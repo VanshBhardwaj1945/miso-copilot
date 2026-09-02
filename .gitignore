@@ -1,0 +1,19 @@
+# secrets — never commit API keys
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# local data stores
+data/
+chroma_db/
+*.sqlite
+*.db
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
