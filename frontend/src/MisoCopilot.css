@@ -1,0 +1,449 @@
+/* MISO Copilot panel. Palette (locked, see UI_RULES.md):
+   navy #092A47 · blue #087CC1 · bright blue #1496D4 · green #65B82E
+   text #122B40 · muted #526575 · border #DCE5EB · soft bg #F6F9FB · tint #EDF6FB */
+
+.miso-copilot {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  height: 520px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #dce5eb;
+  border-radius: 16px;
+  box-shadow:
+    0 12px 30px rgba(9, 42, 71, 0.1),
+    0 2px 8px rgba(9, 42, 71, 0.06);
+  overflow: hidden;
+  z-index: 9999;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #122b40;
+}
+
+/* top-left resize grip */
+
+.miso-copilot-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.miso-copilot-resize::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid #9db7c8;
+  border-left: 2px solid #9db7c8;
+  border-top-left-radius: 3px;
+}
+
+.miso-copilot-resize:hover::before {
+  border-color: #087cc1;
+}
+
+/* header */
+
+.miso-copilot-header {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid #e5ebef;
+  background: #ffffff;
+}
+
+.miso-copilot-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.miso-copilot-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #092a47;
+  color: #ffffff;
+  font-size: 17px;
+}
+
+.miso-copilot-title h2 {
+  margin: 0;
+  color: #092a47;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.miso-copilot-status {
+  display: block;
+  margin-top: 2px;
+  color: #718392;
+  font-size: 11px;
+}
+
+.miso-copilot-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #536675;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.miso-copilot-close:hover {
+  background: #f1f5f7;
+  color: #092a47;
+}
+
+/* body */
+
+.miso-copilot-body {
+  flex: 1;
+  padding: 24px 18px;
+  overflow-y: auto;
+  background: #ffffff;
+}
+
+.miso-copilot-intro {
+  margin-bottom: 24px;
+}
+
+.miso-copilot-intro h3 {
+  margin: 0 0 8px;
+  color: #092a47;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.miso-copilot-intro p {
+  margin: 0;
+  color: #526575;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* suggested questions */
+
+.miso-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.miso-suggestion {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #dce5eb;
+  border-radius: 9px;
+  color: #17354c;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 150ms ease, background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.miso-suggestion:hover {
+  background: #f7fafc;
+  border-color: #9db7c8;
+  box-shadow: 0 2px 6px rgba(9, 42, 71, 0.05);
+}
+
+.miso-suggestion-icon {
+  width: 25px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 9px;
+  border-radius: 6px;
+  background: #edf6fb;
+  color: #087cc1;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.miso-suggestion-text {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.miso-suggestion-arrow {
+  margin-left: 8px;
+  color: #718392;
+  font-size: 20px;
+  transition: transform 150ms ease;
+}
+
+.miso-suggestion:hover .miso-suggestion-arrow {
+  transform: translateX(2px);
+  color: #087cc1;
+}
+
+/* messages */
+
+.miso-msg {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.miso-msg-user {
+  margin-left: 48px;
+  background: #092a47;
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.miso-msg-assistant {
+  margin-right: 24px;
+  background: #f6f9fb;
+  border: 1px solid #e5ebef;
+  color: #122b40;
+  border-bottom-left-radius: 4px;
+}
+
+.miso-msg-error {
+  background: #fdf8f3;
+  border-color: #ecd9c4;
+}
+
+.miso-msg-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.miso-msg-asof {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #718392;
+  font-style: italic;
+}
+
+.miso-msg-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.miso-source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid #c9dcea;
+  border-radius: 999px;
+  background: #edf6fb;
+  color: #087cc1;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.miso-source-chip:hover {
+  background: #ddeef8;
+  border-color: #087cc1;
+}
+
+.miso-msg-loading {
+  display: inline-flex;
+  gap: 5px;
+  padding: 14px 16px;
+}
+
+.miso-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9db7c8;
+  animation: miso-pulse 1.2s infinite ease-in-out;
+}
+
+.miso-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.miso-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes miso-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* input */
+
+.miso-copilot-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 14px;
+  padding: 6px;
+  border: 1px solid #ccd9e1;
+  border-radius: 12px;
+  background: #ffffff;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.miso-copilot-input-wrapper:focus-within {
+  border-color: #087cc1;
+  box-shadow: 0 0 0 3px rgba(8, 124, 193, 0.1);
+}
+
+.miso-copilot-input-wrapper textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #122b40;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.miso-copilot-input-wrapper textarea::placeholder {
+  color: #8293a0;
+}
+
+.miso-copilot-input-wrapper textarea:disabled {
+  color: #8293a0;
+}
+
+.miso-copilot-send {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #092a47;
+  color: #ffffff;
+  font-size: 17px;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.miso-copilot-send:hover:not(:disabled) {
+  background: #087cc1;
+  transform: translateX(1px);
+}
+
+.miso-copilot-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.miso-copilot-send:disabled {
+  background: #9db7c8;
+  cursor: default;
+}
+
+/* launcher (panel closed) */
+
+.miso-copilot-launcher {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: #092a47;
+  color: #ffffff;
+  box-shadow:
+    0 8px 24px rgba(9, 42, 71, 0.18),
+    0 2px 6px rgba(9, 42, 71, 0.1);
+  cursor: pointer;
+  z-index: 9999;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.miso-copilot-launcher:hover {
+  background: #087cc1;
+  transform: translateY(-2px);
+}
+
+.miso-copilot-sparkle {
+  font-size: 22px;
+}
+
+@media (max-width: 640px) {
+  .miso-copilot {
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    width: auto !important;
+    height: calc(100vh - 100px) !important;
+    max-height: none;
+    border-radius: 14px;
+  }
+
+  .miso-copilot-resize {
+    display: none;
+  }
+
+  .miso-copilot-header {
+    min-height: 64px;
+  }
+
+  .miso-copilot-body {
+    padding: 20px 14px;
+  }
+
+  .miso-copilot-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+}

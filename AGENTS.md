@@ -16,9 +16,11 @@ and the design decisions with their rationale.
 ## Layout
 
 ```
-app.py            # Streamlit chat UI (works standalone with a stubbed answer)
+frontend/         # React (Vite) demo UI - landing page + Copilot panel
+                  #   design rules & locked palette: frontend/UI_RULES.md (read first)
+app.py            # Streamlit chat UI (fallback, works standalone with a stubbed answer)
 docs/             # architecture diagram (arch-v1.png + editable .excalidraw source)
-backend/          # (planned) FastAPI app: /ask endpoint, 15-min poller, summarizers
+backend/          # FastAPI app: /ask endpoint (direct Claude call today; RAG + poller next)
 ingest/           # (planned) one-time LlamaIndex document ingestion
 data/             # Chroma persistence - gitignored, never commit
 requirements.txt  # streamlit + requests today; backend deps are commented until used
@@ -26,15 +28,34 @@ requirements.txt  # streamlit + requests today; backend deps are commented until
 
 ## Run / verify
 
+React UI (primary demo frontend):
+
+```bash
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+Backend (needs `CLAUDE_API_KEY` in `.env` or the environment; without it, `/ask`
+returns 503 and the UI shows the graceful handoff):
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+uvicorn backend.main:app --reload --port 8000
+```
+
+Streamlit UI (fallback):
+
+```bash
 streamlit run app.py
 ```
 
-There is no test suite yet. Minimum verification for any change: the Streamlit app
-starts and a chat message round-trips (stub answer is fine). If you add backend
-code, also verify `uvicorn` boots and `/ask` responds.
+There is no test suite yet. Minimum verification for any change: the touched UI
+boots and a chat message round-trips (stub answer / graceful handoff is fine). If
+you add backend code, also verify `uvicorn` boots and `/ask` responds. The React
+dev server proxies `/ask` to `localhost:8000` (vite.config.js) - keep that
+contract: `POST /ask {question}` → `{answer, sources[{title,url}], as_of}`.
+Frontend rule: React + plain CSS only, no UI libraries (react-markdown is the
+only pre-approved addition).
 
 ## Architecture rules (do not "improve" these away)
 

@@ -101,22 +101,44 @@ Key design decisions:
 
 ## Quickstart
 
+**React UI (the demo frontend)** - a static MISO-style landing page with the Copilot
+panel docked in the upper-right:
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+```
+
+**Backend (FastAPI + Claude)**:
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+echo 'CLAUDE_API_KEY=sk-ant-...' > .env    # gitignored - never commit
+uvicorn backend.main:app --reload --port 8000
+```
+
+**Streamlit UI (fallback / quick testing)**:
+
+```bash
 streamlit run app.py
 ```
 
-The UI currently runs standalone with a stubbed answer function; the FastAPI backend,
-poller, and LlamaIndex ingestion land next.
+The React dev server proxies `/ask` to `localhost:8000` (no CORS setup needed).
+Without a key the backend returns 503 and the widget shows a graceful handoff to
+MISO's contact form. The current backend sends every question straight to Claude
+(Opus 5) with a MISO system prompt; the RAG store (Chroma + LlamaIndex) and the
+15-min poller land next.
 
-## Repo layout (planned)
+## Repo layout
 
 ```
-app.py            # Streamlit chat UI (this is here now)
+frontend/         # React (Vite) demo UI: landing page + Copilot panel (see frontend/UI_RULES.md)
+backend/          # FastAPI app: /ask endpoint (Claude call); poller + RAG land next
+app.py            # Streamlit chat UI (fallback, works standalone with a stubbed answer)
 docs/             # architecture diagram: arch-v1.png + editable .excalidraw source
-backend/          # FastAPI app: /ask endpoint, poller, summarizers
-ingest/           # one-time LlamaIndex document ingestion
+ingest/           # (planned) one-time LlamaIndex document ingestion
 data/             # Chroma persistence (gitignored)
 ```
 

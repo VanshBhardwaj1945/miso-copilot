@@ -1,11 +1,11 @@
 streamlit>=1.37
 requests>=2.32
+fastapi
+uvicorn
+anthropic
 
-# Coming with the backend/ingestion (uncomment as they land):
-# fastapi
-# uvicorn
+# Coming with the RAG store / ingestion (uncomment as they land):
 # apscheduler
-# anthropic
 # llama-index
 # llama-index-vector-stores-chroma
 # llama-index-embeddings-huggingface
