@@ -1,24 +1,24 @@
-# MISO Copilot ⚡
+# MISO Copilot
 
 An AI assistant that sits on top of [miso.org](https://www.misoenergy.org) and answers
-plain-English questions about MISO's public data — so routine questions get answered in
+plain-English questions about MISO's public data - so routine questions get answered in
 seconds instead of becoming emails to MISO's CSR and External Affairs teams.
 
-Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) — Prompt 1: *Intelligent
+Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intelligent
 Navigation of MISO's Public Information*.
 
 ```mermaid
 flowchart LR
-    subgraph FEED["🔄 Background feed — every 15 min"]
+    subgraph FEED["Background feed - every 15 min"]
         POLL["Poller<br/>(APScheduler, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
         MISOAPI --> SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
     end
 
-    subgraph INGEST["📄 One-time doc ingestion (polite fetch)"]
+    subgraph INGEST["One-time doc ingestion (polite fetch)"]
         DOCS["MISO docs & reports<br/>(Fact Sheet, Market Reports)"] --> LI["LlamaIndex pipeline<br/>load → CHUNK → embed"]
     end
 
-    subgraph ASK["💬 Question time"]
+    subgraph ASK["Question time"]
         USER(["User<br/>(grandma → engineer)"]) --> UI["Chat UI<br/>(Streamlit)"]
         UI --> API["FastAPI backend"]
         API --> CLAUDE["Claude<br/>+ LlamaIndex retriever"]
@@ -34,7 +34,7 @@ flowchart LR
 ## The problem
 
 MISO (the grid operator for 45M people in the central U.S.) publishes enormous amounts of
-public data — live grid/market APIs, market reports, planning docs, filings — but none of
+public data - live grid/market APIs, market reports, planning docs, filings - but none of
 it is findable by a normal person. The site search is weak and the Market Reports section
 has 11 categories of files with almost no filtering. So everyone from curious citizens to
 utility analysts emails MISO's human teams instead.
@@ -59,7 +59,7 @@ QUESTION TIME
 
 Key design decisions:
 
-- **Pull-based, not call-time**: no live API dependency at question time — the demo works
+- **Pull-based, not call-time**: no live API dependency at question time - the demo works
   even if MISO's APIs are down. Tradeoff: answers are ≤15 min stale (stated in every
   answer as "as of \<time\>").
 - **UPSERT, never append**: one document per API endpoint with a fixed ID, overwritten
@@ -67,7 +67,7 @@ Key design decisions:
 - **JSON → prose before embedding**: snapshots are stored as natural-language paragraphs
   ("As of 6:55 PM EST, total generation is 114,136 MW; natural gas leads with…") because
   prose embeds well and raw JSON doesn't.
-- **Citations everywhere**: every answer carries its source URL — the link *is* the
+- **Citations everywhere**: every answer carries its source URL - the link *is* the
   product for "where do I find X" questions.
 
 ## Stack
@@ -85,10 +85,10 @@ Key design decisions:
 ## Data sources
 
 - **Live grid/market data**: [MISO Real-Time Data APIs](https://www.misoenergy.org/markets-and-operations/rtdataapis/)
-  — FuelMix, RealTimeTotalLoad, WindSolar, MarketPricing (LMP), Interchange, outages, and
+  - FuelMix, RealTimeTotalLoad, WindSolar, MarketPricing (LMP), Interchange, outages, and
   more. Free JSON, no auth. Polled respectfully (≤1 request/endpoint/minute).
 - **Documents**: MISO Fact Sheet, key site pages, Market Reports listings, help-center
-  articles — fetched once, politely, at low volume. (Per MISO's guidance: no scraping.)
+  articles - fetched once, politely, at low volume. (Per MISO's guidance: no scraping.)
 
 ## Quickstart
 
@@ -112,4 +112,4 @@ data/             # Chroma persistence + SQLite (gitignored)
 
 ## Team
 
-Fall 2026 MISO Xtern Challenge — Prompt 1. Demo day: Sept 11, MISO HQ, Carmel, IN.
+Fall 2026 MISO Xtern Challenge - Prompt 1. Demo day: Sept 11, MISO HQ, Carmel, IN.

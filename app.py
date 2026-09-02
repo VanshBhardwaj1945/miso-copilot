@@ -1,4 +1,4 @@
-"""MISO Copilot — Streamlit chat UI.
+"""MISO Copilot - Streamlit chat UI.
 
 Runs standalone for now: answers come from a stub until the FastAPI backend
 (/ask endpoint) is wired in. Set BACKEND_URL when the backend exists.
@@ -19,12 +19,12 @@ SAMPLE_QUESTIONS = [
     "What is MISO's latest seasonal reliability assessment?",
 ]
 
-st.set_page_config(page_title="MISO Copilot", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="MISO Copilot", layout="centered")
 
 with st.sidebar:
-    st.title("⚡ MISO Copilot")
+    st.title("MISO Copilot")
     st.caption(
-        "Ask anything about MISO's public data — grid conditions, market reports, "
+        "Ask anything about MISO's public data - grid conditions, market reports, "
         "processes, filings. Answers cite their source and state how fresh the "
         "data is."
     )
@@ -35,7 +35,7 @@ with st.sidebar:
             st.session_state.queued_question = q
     st.divider()
     st.caption(
-        "Fall 2026 MISO Xtern Challenge — Prompt 1. Data: MISO public APIs & "
+        "Fall 2026 MISO Xtern Challenge - Prompt 1. Data: MISO public APIs & "
         "public documents. Not an official MISO product."
     )
 
@@ -58,7 +58,7 @@ def get_answer(question: str) -> str:
 
     now = datetime.now().strftime("%-I:%M %p")
     return (
-        f"🚧 **Backend not wired up yet** — this is the UI skeleton.\n\n"
+        f"**Backend not wired up yet** - this is the UI skeleton.\n\n"
         f"When it's connected, I'll answer *\"{question}\"* from MISO's public "
         f"data and reply with something like:\n\n"
         f"> As of {now} EST, MISO's total generation is 114,136 MW. Natural gas "
