@@ -99,10 +99,22 @@ Key design decisions:
 - **Documents**: MISO Fact Sheet, key site pages, Market Reports listings, help-center
   articles - fetched once, politely, at low volume. (Per MISO's guidance: no scraping.)
 
+## Two frontends, one backend (deliberate)
+
+There are two separate UIs that call the same FastAPI backend, and they are NOT
+layers of one stack - they are alternatives:
+
+- **React app (`frontend/`) = the demo.** Custom-designed landing page + Copilot
+  widget in the MISO palette. This is what judges see.
+- **Streamlit app (`app.py`) = testing/backup only.** One Python command, zero
+  Node, Streamlit's default look. Used for quick testing and as demo-day
+  insurance if the React app can't run. It intentionally does NOT embed or
+  wrap the React app - keeping it independent is what makes it a real fallback.
+
 ## Quickstart
 
 **React UI (the demo frontend)** - a static MISO-style landing page with the Copilot
-panel docked in the upper-right:
+panel docked in the bottom-right:
 
 ```bash
 cd frontend

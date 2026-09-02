@@ -26,7 +26,8 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   llm/                      #   Claude client + system prompt
   rag/                      #   (planned) Chroma + LlamaIndex retrieval - see its README
   poller/                   #   (planned) 15-min poller + summarizers - see its README
-app.py                      # Streamlit chat UI (fallback; calls the same backend /ask)
+app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
+                            #   independent of frontend/ by design, do not merge them)
 docs/                       # architecture diagram (arch-v1.png + .excalidraw source)
 ingest/                     # (planned) one-time LlamaIndex document ingestion
 data/                       # Chroma persistence - gitignored, never commit
