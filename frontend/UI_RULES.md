@@ -31,8 +31,9 @@ Professional, institutional, modern, trustworthy. It should feel like a
 
 ## 4. Copilot panel
 
-Fixed **upper-right**, ~360px wide, white background, 1px subtle border,
-14–16px radius, restrained navy shadow. Mobile: near full-width.
+Fixed **bottom-right** (opens from the launcher button), default ~360×520px,
+resizable via the top-left grip, white background, 1px subtle border, 14–16px
+radius, restrained navy shadow. Mobile: near full-width, resize grip hidden.
 
 ## 5. Header
 

@@ -1,15 +1,17 @@
-"""MISO Copilot - Streamlit chat UI.
+"""MISO Copilot - Streamlit chat UI (fallback frontend).
 
-Runs standalone for now: answers come from a stub until the FastAPI backend
-(/ask endpoint) is wired in. Set BACKEND_URL when the backend exists.
+Talks to the FastAPI backend at MISO_COPILOT_BACKEND (default
+http://localhost:8000). If the backend is down or unconfigured, shows a
+graceful handoff to MISO's contact form instead of an answer.
 """
 
 import os
-from datetime import datetime
 
+import requests
 import streamlit as st
 
-BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "")  # e.g. http://localhost:8000
+BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "http://localhost:8000")
+CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
 
 SAMPLE_QUESTIONS = [
     "How much wind power is MISO generating right now?",
@@ -44,29 +46,25 @@ st.caption("The front door to MISO's public data. Ask in plain English.")
 
 
 def get_answer(question: str) -> str:
-    """Return an answer for the question.
-
-    Stub until the FastAPI backend exists. Once it does, POST the question to
-    f"{BACKEND_URL}/ask" and return the response text + sources.
-    """
-    if BACKEND_URL:
-        import requests
-
-        resp = requests.post(f"{BACKEND_URL}/ask", json={"question": question}, timeout=60)
+    """POST the question to the backend; return markdown-formatted answer."""
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/ask", json={"question": question}, timeout=60
+        )
         resp.raise_for_status()
-        return resp.json()["answer"]
+        data = resp.json()
+    except requests.RequestException:
+        return (
+            "I couldn't reach MISO Copilot's data service just now. For help "
+            f"with this question, please use the [MISO Contact Form]({CONTACT_URL})."
+        )
 
-    now = datetime.now().strftime("%-I:%M %p")
-    return (
-        f"**Backend not wired up yet** - this is the UI skeleton.\n\n"
-        f"When it's connected, I'll answer *\"{question}\"* from MISO's public "
-        f"data and reply with something like:\n\n"
-        f"> As of {now} EST, MISO's total generation is 114,136 MW. Natural gas "
-        f"leads with 44,591 MW (39%), followed by coal at 37,817 MW (33%), "
-        f"nuclear at 11,871 MW, and wind at 5,639 MW.\n>\n"
-        f"> Source: [MISO Real-Time Displays]"
-        f"(https://www.misoenergy.org/markets-and-operations/real-time--market-data/real-time-displays/)"
-    )
+    parts = [data["answer"]]
+    if data.get("as_of"):
+        parts.append(f"*as of {data['as_of']}*")
+    for s in data.get("sources", []):
+        parts.append(f"Source: [{s.get('title', s['url'])}]({s['url']})")
+    return "\n\n".join(parts)
 
 
 if "messages" not in st.session_state:

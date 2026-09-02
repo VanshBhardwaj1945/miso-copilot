@@ -16,14 +16,21 @@ and the design decisions with their rationale.
 ## Layout
 
 ```
-frontend/         # React (Vite) demo UI - landing page + Copilot panel
-                  #   design rules & locked palette: frontend/UI_RULES.md (read first)
-app.py            # Streamlit chat UI (fallback, works standalone with a stubbed answer)
-docs/             # architecture diagram (arch-v1.png + editable .excalidraw source)
-backend/          # FastAPI app: /ask endpoint (direct Claude call today; RAG + poller next)
-ingest/           # (planned) one-time LlamaIndex document ingestion
-data/             # Chroma persistence - gitignored, never commit
-requirements.txt  # streamlit + requests today; backend deps are commented until used
+frontend/                   # React (Vite) demo UI
+  src/copilot/              #   Copilot chat panel - the product
+  src/fake-landingpage/     #   static MISO-style backdrop (no logic, keep it that way)
+  UI_RULES.md               #   design rules & locked palette - read before touching UI
+backend/                    # FastAPI app (entry: uvicorn backend.main:app)
+  config.py                 #   .env loading, model + URL constants
+  routes/                   #   /ask and /health endpoints
+  llm/                      #   Claude client + system prompt
+  rag/                      #   (planned) Chroma + LlamaIndex retrieval - see its README
+  poller/                   #   (planned) 15-min poller + summarizers - see its README
+app.py                      # Streamlit chat UI (fallback; calls the same backend /ask)
+docs/                       # architecture diagram (arch-v1.png + .excalidraw source)
+ingest/                     # (planned) one-time LlamaIndex document ingestion
+data/                       # Chroma persistence - gitignored, never commit
+requirements.txt            # deps stay commented until the code that imports them lands
 ```
 
 ## Run / verify

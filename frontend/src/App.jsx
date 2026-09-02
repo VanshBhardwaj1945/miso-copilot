@@ -1,5 +1,5 @@
-import MisoLandingPage from "./MisoLandingPage.jsx";
-import MisoCopilot from "./MisoCopilot.jsx";
+import MisoLandingPage from "./fake-landingpage/MisoLandingPage.jsx";
+import MisoCopilot from "./copilot/MisoCopilot.jsx";
 import "./App.css";
 
 export default function App() {

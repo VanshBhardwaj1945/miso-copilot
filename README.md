@@ -134,12 +134,20 @@ MISO's contact form. The current backend sends every question straight to Claude
 ## Repo layout
 
 ```
-frontend/         # React (Vite) demo UI: landing page + Copilot panel (see frontend/UI_RULES.md)
-backend/          # FastAPI app: /ask endpoint (Claude call); poller + RAG land next
-app.py            # Streamlit chat UI (fallback, works standalone with a stubbed answer)
-docs/             # architecture diagram: arch-v1.png + editable .excalidraw source
-ingest/           # (planned) one-time LlamaIndex document ingestion
-data/             # Chroma persistence (gitignored)
+frontend/                     # React (Vite) demo UI (see frontend/UI_RULES.md)
+  src/copilot/                #   the Copilot chat panel (the product)
+  src/fake-landingpage/       #   static MISO-style backdrop page
+backend/                      # FastAPI app
+  main.py                     #   app entry (uvicorn backend.main:app)
+  config.py                   #   .env loading, model + URL constants
+  routes/                     #   /ask and /health endpoints
+  llm/                        #   Claude client + system prompt
+  rag/                        #   (planned) Chroma + LlamaIndex retrieval
+  poller/                     #   (planned) 15-min poller + JSON->prose summarizers
+app.py                        # Streamlit chat UI (fallback; talks to the same backend)
+docs/                         # architecture diagram: arch-v1.png + .excalidraw source
+ingest/                       # (planned) one-time LlamaIndex document ingestion
+data/                         # Chroma persistence (gitignored)
 ```
 
 A full rendering of the architecture lives in [`docs/arch-v1.png`](docs/arch-v1.png);
