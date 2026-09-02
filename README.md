@@ -105,10 +105,15 @@ poller, and LlamaIndex ingestion land next.
 
 ```
 app.py            # Streamlit chat UI (this is here now)
+docs/             # architecture diagram: arch-v1.png + editable .excalidraw source
 backend/          # FastAPI app: /ask endpoint, poller, summarizers
 ingest/           # one-time LlamaIndex document ingestion
 data/             # Chroma persistence + SQLite (gitignored)
 ```
+
+A full rendering of the architecture lives in [`docs/arch-v1.png`](docs/arch-v1.png);
+to edit it, drag [`docs/architecture.excalidraw`](docs/architecture.excalidraw) into
+[excalidraw.com](https://excalidraw.com).
 
 ## Team
 
