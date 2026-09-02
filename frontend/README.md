@@ -28,7 +28,18 @@ POST /ask  {"question": "..."}
 → {"answer": "...", "sources": [{"title": "...", "url": "..."}], "as_of": "6:55 PM EST"}
 ```
 
+## Answer rendering
+
+Assistant answers render rich content (`src/copilot/Markdown.jsx`):
+
+- Full GFM markdown: **bold**, tables, lists, inline links, code blocks
+- LaTeX math via KaTeX: `$...$` / `$$...$$` (real fractions and symbols)
+- Charts via Recharts: the backend emits ` ```chart ` fenced JSON blocks
+  (`type`: line / bar / area / pie) that `ChartBlock.jsx` renders with a
+  fixed colorblind-safe series palette
+
 ## Dependencies
 
-React + plain CSS only — `react`, `react-dom`, `vite`, `@vitejs/plugin-react`
-(all MIT). No UI libraries.
+All MIT, no UI component libraries: `react`, `react-dom`, `vite`,
+`@vitejs/plugin-react`, `react-markdown`, `remark-gfm`, `remark-math`,
+`rehype-katex`, `katex`, `recharts`.

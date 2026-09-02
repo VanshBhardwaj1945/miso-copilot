@@ -143,6 +143,11 @@ MISO's contact form. The current backend sends every question straight to Claude
 (Opus 5) with a MISO system prompt; the RAG store (Chroma + LlamaIndex) and the
 15-min poller land next.
 
+Answers are markdown and both UIs render it: bold/tables/lists, inline links,
+code blocks, LaTeX math (KaTeX, real symbols and fractions), and charts - the
+backend emits ` ```chart ` fenced JSON blocks (line/bar/area/pie) that the React
+UI renders with Recharts and Streamlit renders with its native charts.
+
 ## Repo layout
 
 ```

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Markdown from "./Markdown.jsx";
 import "./MisoCopilot.css";
 
 // Design + product rules: see UI_RULES.md.
@@ -210,7 +211,13 @@ export default function MisoCopilot() {
                       (msg.error ? " miso-msg-error" : "")
                 }
               >
-                <div className="miso-msg-content">{msg.content}</div>
+                <div className="miso-msg-content">
+                  {msg.role === "user" ? (
+                    msg.content
+                  ) : (
+                    <Markdown>{msg.content}</Markdown>
+                  )}
+                </div>
 
                 {msg.asOf && (
                   <div className="miso-msg-asof">as of {msg.asOf}</div>

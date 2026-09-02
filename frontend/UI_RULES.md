@@ -60,6 +60,19 @@ messages compact navy, right side. Never huge colored bubbles.
 - Backend failure / no answer → graceful handoff to MISO's contact form.
   Never a hallucinated answer, never a dead end.
 
+**Rich content** (assistant messages only; user messages stay plain text):
+- Answers render full GFM markdown via `Markdown.jsx`: bold, tables (in a
+  horizontal-scroll wrapper), inline links (open in new tab), code blocks.
+- LaTeX math renders via KaTeX (`$...$` inline, `$$...$$` display) — real
+  fractions and symbols, never plain-text approximations.
+- ` ```chart ` fenced blocks render as Recharts charts via `ChartBlock.jsx`.
+  Spec: `{"type":"line|bar|area|pie","title","unit","labels":[...],
+  "series":[{"name","data":[...]}]}`, max 4 series. Invalid JSON falls back
+  to a code block.
+- **Chart series palette (locked, fixed order, colorblind-validated):**
+  `#087CC1` blue → `#B36F0E` amber → `#00879E` teal → `#3E8814` green.
+  Never reorder, cycle, or add hues; a 5th series folds into "Other".
+
 ## 9. Typography
 
 Clean sans-serif: Inter (Google Fonts, OFL) with system-ui fallback.
@@ -71,10 +84,11 @@ works; never rely on color alone.
 
 ## 11. Dependencies
 
-React + plain CSS **only**. Currently: `react`, `react-dom`, `vite`,
-`@vitejs/plugin-react` (all MIT). If markdown rendering in answers becomes
-necessary, `react-markdown` (MIT) is the only pre-approved addition. Anything
-else must be genuinely open source with a permissive license.
+React + plain CSS for all layout/styling — no UI component libraries.
+Approved rendering deps (all MIT): `react`, `react-dom`, `vite`,
+`@vitejs/plugin-react`, `react-markdown`, `remark-gfm`, `remark-math`,
+`rehype-katex`, `katex`, `recharts`. Anything else must be genuinely open
+source with a permissive license.
 
 ## 12. Backend contract
 

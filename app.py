@@ -5,10 +5,14 @@ http://localhost:8000). If the backend is down or unconfigured, shows a
 graceful handoff to MISO's contact form instead of an answer.
 """
 
+import json
 import os
+import re
 
 import requests
 import streamlit as st
+
+CHART_BLOCK = re.compile(r"```chart\s*\n(.*?)```", re.DOTALL)
 
 BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "http://localhost:8000")
 CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
@@ -45,6 +49,39 @@ st.title("MISO Copilot")
 st.caption("The front door to MISO's public data. Ask in plain English.")
 
 
+def render_answer(markdown_text: str) -> None:
+    """Render an answer: markdown (incl. $LaTeX$ and tables) via st.markdown,
+    and ```chart blocks as Streamlit charts."""
+    import pandas as pd
+
+    pos = 0
+    for match in CHART_BLOCK.finditer(markdown_text):
+        before = markdown_text[pos : match.start()]
+        if before.strip():
+            st.markdown(before)
+        pos = match.end()
+        try:
+            cfg = json.loads(match.group(1))
+            df = pd.DataFrame(
+                {s["name"]: [float(v) for v in s["data"]] for s in cfg["series"]},
+                index=[str(x) for x in cfg["labels"]],
+            )
+            if cfg.get("title"):
+                st.caption(cfg["title"])
+            kind = cfg.get("type", "line")
+            if kind == "area":
+                st.area_chart(df)
+            elif kind in ("bar", "pie"):  # no native pie; bar is the fallback
+                st.bar_chart(df)
+            else:
+                st.line_chart(df)
+        except (KeyError, ValueError, TypeError):
+            st.code(match.group(1), language="json")
+    rest = markdown_text[pos:]
+    if rest.strip():
+        st.markdown(rest)
+
+
 def get_answer(question: str) -> str:
     """POST the question to the backend; return markdown-formatted answer."""
     try:
@@ -72,7 +109,7 @@ if "messages" not in st.session_state:
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        render_answer(msg["content"])
 
 question = st.chat_input("Ask about MISO's grid, markets, reports, or processes…")
 if not question and "queued_question" in st.session_state:
@@ -86,5 +123,5 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Searching MISO's public data…"):
             answer = get_answer(question)
-        st.markdown(answer)
+        render_answer(answer)
     st.session_state.messages.append({"role": "assistant", "content": answer})

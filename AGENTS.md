@@ -62,8 +62,13 @@ boots and a chat message round-trips (stub answer / graceful handoff is fine). I
 you add backend code, also verify `uvicorn` boots and `/ask` responds. The React
 dev server proxies `/ask` to `localhost:8000` (vite.config.js) - keep that
 contract: `POST /ask {question}` → `{answer, sources[{title,url}], as_of}`.
-Frontend rule: React + plain CSS only, no UI libraries (react-markdown is the
-only pre-approved addition).
+`answer` is markdown and may contain LaTeX (`$...$`/`$$...$$`) and ` ```chart `
+fenced JSON blocks (`{"type":"line|bar|area|pie","title","unit","labels",
+"series":[{"name","data"}]}`, max 4 series) - both UIs render all of it, so
+keep the chart spec stable across prompt, React (`ChartBlock.jsx`), and
+Streamlit (`render_answer` in app.py). Frontend rule: React + plain CSS for
+layout, no UI component libraries; approved rendering deps are listed in
+frontend/UI_RULES.md §11.
 
 ## Architecture rules (do not "improve" these away)
 
