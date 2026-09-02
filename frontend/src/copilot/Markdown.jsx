@@ -14,11 +14,13 @@ export default function Markdown({ children }) {
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={{
+        // Links open in a new tab so the chat stays put.
         a: ({ href, children: kids }) => (
           <a href={href} target="_blank" rel="noopener noreferrer">
             {kids}
           </a>
         ),
+        // ```chart blocks become charts; everything else stays a code block.
         code: ({ className, children: kids, ...props }) => {
           if (/language-chart/.test(className || "")) {
             return <ChartBlock spec={String(kids)} />;
@@ -29,6 +31,7 @@ export default function Markdown({ children }) {
             </code>
           );
         },
+        // Wrap tables so wide ones scroll instead of breaking the panel.
         table: ({ children: kids }) => (
           <div className="miso-md-tablewrap">
             <table>{kids}</table>

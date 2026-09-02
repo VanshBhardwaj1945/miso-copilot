@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown.jsx";
 import "./MisoCopilot.css";
 
-// Design + product rules: see UI_RULES.md.
-// Backend: POST /ask {question} -> {answer, sources[{title,url}], as_of}
+// The Copilot chat panel. Design + product rules: see UI_RULES.md.
+// Backend contract: POST /ask {question} -> {answer, sources[{title,url}], as_of}
 // (/ask is proxied to FastAPI on :8000, see vite.config.js)
 
 const SUGGESTED_QUESTIONS = [
@@ -17,7 +17,19 @@ const CONTACT_URL = "https://www.misoenergy.org/about/contact-us/";
 
 const DEFAULT_SIZE = { width: 360, height: 520 };
 const MIN_SIZE = { width: 320, height: 380 };
-const MAX_INPUT_HEIGHT = 120;
+const SCREEN_MARGIN = 48; // panel never gets closer than this to screen edges
+const MAX_INPUT_HEIGHT = 120; // keep in sync with textarea max-height in the CSS
+
+// Pick the CSS classes for one chat message bubble.
+function messageClass(msg) {
+  if (msg.role === "user") {
+    return "miso-msg miso-msg-user";
+  }
+  if (msg.error) {
+    return "miso-msg miso-msg-assistant miso-msg-error";
+  }
+  return "miso-msg miso-msg-assistant";
+}
 
 export default function MisoCopilot() {
   const [isOpen, setIsOpen] = useState(true);
@@ -28,29 +40,27 @@ export default function MisoCopilot() {
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Keep the newest message scrolled into view.
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
 
-  // Panel is anchored bottom-right; dragging the top-left grip grows it
-  // up and to the left.
+  // Drag handler for the top-left grip: the panel is anchored bottom-right,
+  // so moving the pointer up/left grows it.
   function startResize(e) {
     e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
-    const { width, height } = size;
+    const startWidth = size.width;
+    const startHeight = size.height;
 
     const onMove = (ev) => {
+      const newWidth = startWidth + (startX - ev.clientX);
+      const newHeight = startHeight + (startY - ev.clientY);
       setSize({
-        width: Math.min(
-          Math.max(width + (startX - ev.clientX), MIN_SIZE.width),
-          window.innerWidth - 48
-        ),
-        height: Math.min(
-          Math.max(height + (startY - ev.clientY), MIN_SIZE.height),
-          window.innerHeight - 48
-        ),
+        width: clamp(newWidth, MIN_SIZE.width, window.innerWidth - SCREEN_MARGIN),
+        height: clamp(newHeight, MIN_SIZE.height, window.innerHeight - SCREEN_MARGIN),
       });
     };
     const onUp = () => {
@@ -61,6 +71,14 @@ export default function MisoCopilot() {
     window.addEventListener("pointerup", onUp);
   }
 
+  // Keep value between min and max.
+  function clamp(value, min, max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
+  // Grow the textarea to fit its content, up to MAX_INPUT_HEIGHT.
   function autoGrow() {
     const el = inputRef.current;
     if (!el) return;
@@ -68,13 +86,14 @@ export default function MisoCopilot() {
     el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + "px";
   }
 
+  // Send a question to the backend and append both sides of the exchange.
   async function ask(question) {
     const q = question.trim();
     if (!q || loading) return;
 
     setMessages((m) => [...m, { role: "user", content: q }]);
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
+    if (inputRef.current) inputRef.current.style.height = "auto"; // shrink back after send
     setLoading(true);
 
     try {
@@ -95,6 +114,7 @@ export default function MisoCopilot() {
         },
       ]);
     } catch (err) {
+      // Graceful handoff - never a dead end (product rule, see UI_RULES.md).
       setMessages((m) => [
         ...m,
         {
@@ -111,11 +131,13 @@ export default function MisoCopilot() {
     }
   }
 
+  // Send button / form submit.
   const handleSubmit = (e) => {
     e.preventDefault();
     ask(input);
   };
 
+  // Enter sends; Shift+Enter makes a new line.
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -125,6 +147,7 @@ export default function MisoCopilot() {
 
   return (
     <>
+      {/* Floating launcher, shown only while the panel is closed. */}
       {!isOpen && (
         <button
           className="miso-copilot-launcher"
@@ -170,6 +193,7 @@ export default function MisoCopilot() {
           </header>
 
           <main className="miso-copilot-body" ref={bodyRef}>
+            {/* Intro + suggested questions, shown until the first message. */}
             {messages.length === 0 && (
               <>
                 <div className="miso-copilot-intro">
@@ -201,16 +225,10 @@ export default function MisoCopilot() {
               </>
             )}
 
+            {/* Chat history. Assistant answers render markdown/math/charts;
+                user messages stay plain text. */}
             {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={
-                  msg.role === "user"
-                    ? "miso-msg miso-msg-user"
-                    : "miso-msg miso-msg-assistant" +
-                      (msg.error ? " miso-msg-error" : "")
-                }
-              >
+              <div key={i} className={messageClass(msg)}>
                 <div className="miso-msg-content">
                   {msg.role === "user" ? (
                     msg.content
@@ -241,6 +259,7 @@ export default function MisoCopilot() {
               </div>
             ))}
 
+            {/* Typing indicator while waiting on the backend. */}
             {loading && (
               <div
                 className="miso-msg miso-msg-assistant miso-msg-loading"

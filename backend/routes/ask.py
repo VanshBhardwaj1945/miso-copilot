@@ -18,6 +18,7 @@ class AskRequest(BaseModel):
 
 @router.post("/ask")
 def ask(req: AskRequest):
+    """Answer one question via Claude; maps API failures to clean HTTP errors."""
     if claude.client is None:
         raise HTTPException(503, "CLAUDE_API_KEY is not configured")
 
@@ -38,4 +39,5 @@ def ask(req: AskRequest):
 
 @router.get("/health")
 def health():
+    """Quick check that the server is up and whether a Claude key is loaded."""
     return {"ok": True, "claude_configured": claude.client is not None}
