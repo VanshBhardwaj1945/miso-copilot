@@ -8,36 +8,32 @@ Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intell
 Navigation of MISO's Public Information*.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph FEED["BACKGROUND FEED - runs every 15 min"]
-        direction LR
         POLL["Poller<br/>(APScheduler in FastAPI, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
         MISOAPI --> SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
     end
 
     subgraph ASK["QUESTION TIME"]
-        direction LR
-        USER(["User<br/>(grandma → engineer)"]) --> UI["Chat UI<br/>(Streamlit)"]
+        USER(["User"]) --> UI["Chat UI<br/>(Streamlit)"]
         UI --> API["FastAPI backend<br/>(GitHub repo)"]
         API --> CLAUDE["Claude (Opus 5)<br/>answers w/ retrieved ctx"]
     end
 
-    DB[("Chroma vector DB - the ONLY store<br/>live snapshots (upserted) + docs (one-time)")]
-
     subgraph INGEST["ONE-TIME DOC INGESTION"]
-        direction LR
         DOCS["MISO docs & reports<br/>(Fact Sheet, Market Reports)"] --> LI["LlamaIndex pipeline<br/>load → CHUNK → embed"]
     end
+
+    DB[("Chroma vector DB - the ONLY store<br/>live snapshots (upserted)<br/>+ docs (one-time)")]
 
     SUMM -- "UPSERT via LlamaIndex (no chunking -<br/>snapshots are small): one doc per<br/>endpoint, fixed ID - replaces old" --> DB
     CLAUDE -- "search_docs() = LlamaIndex<br/>retriever → top chunks" --> DB
     LI -- "runs ONCE (polite fetch)" --> DB
     CLAUDE -. "answer + 'as of 6:55 PM' + source link" .-> USER
 
-    N1["RULE: never APPEND snapshots.<br/>UPSERT/overwrite - or search<br/>retrieves stale data."]
-    N2["Tradeoff (own it to judges):<br/>answers ≤15 min stale, but ZERO<br/>live dependencies on demo day"]
-    N3["Chroma is the only store.<br/>Poller dies? Last snapshot stays -<br/>degrades gracefully, never breaks"]
-    N4["No answer? Graceful handoff to<br/>MISO contact form (humans keep<br/>only the hard questions)"]
+    subgraph NOTES["NOTES"]
+        N1["RULE: never APPEND snapshots.<br/>UPSERT/overwrite - or search<br/>retrieves stale data."] ~~~ N2["Tradeoff (own it to judges):<br/>answers ≤15 min stale, but ZERO<br/>live dependencies on demo day"] ~~~ N3["Chroma is the only store.<br/>Poller dies? Last snapshot stays -<br/>degrades gracefully, never breaks"] ~~~ N4["No answer? Graceful handoff to<br/>MISO contact form (humans keep<br/>only the hard questions)"]
+    end
 
     classDef note fill:#fff9db,stroke:#f08c00,color:#1e1e1e
     classDef rule fill:#ffc9c9,stroke:#e03131,color:#1e1e1e
