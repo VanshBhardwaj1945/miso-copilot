@@ -7,6 +7,30 @@ seconds instead of becoming emails to MISO's CSR and External Affairs teams.
 Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) — Prompt 1: *Intelligent
 Navigation of MISO's Public Information*.
 
+```mermaid
+flowchart LR
+    subgraph FEED["🔄 Background feed — every 15 min"]
+        POLL["Poller<br/>(APScheduler, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
+        MISOAPI --> SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
+    end
+
+    subgraph INGEST["📄 One-time doc ingestion (polite fetch)"]
+        DOCS["MISO docs & reports<br/>(Fact Sheet, Market Reports)"] --> LI["LlamaIndex pipeline<br/>load → CHUNK → embed"]
+    end
+
+    subgraph ASK["💬 Question time"]
+        USER(["User<br/>(grandma → engineer)"]) --> UI["Chat UI<br/>(Streamlit)"]
+        UI --> API["FastAPI backend"]
+        API --> CLAUDE["Claude<br/>+ LlamaIndex retriever"]
+    end
+
+    SUMM -- "UPSERT: fixed doc_id per endpoint,<br/>replaces old snapshot (no chunking)" --> DB[("Chroma vector DB<br/>live snapshots + docs")]
+    LI -- "runs ONCE" --> DB
+    CLAUDE -- "search_docs() → top chunks" --> DB
+    MISOAPI -. "raw JSON appended" .-> SQL[("SQLite<br/>history + dashboard")]
+    CLAUDE -. "answer + 'as of &lt;time&gt;' + source link" .-> USER
+```
+
 ## The problem
 
 MISO (the grid operator for 45M people in the central U.S.) publishes enormous amounts of
