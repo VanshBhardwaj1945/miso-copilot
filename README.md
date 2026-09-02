@@ -8,27 +8,41 @@ Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intell
 Navigation of MISO's Public Information*.
 
 ```mermaid
-flowchart LR
-    subgraph FEED["Background feed - every 15 min"]
-        POLL["Poller<br/>(APScheduler, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
+flowchart TB
+    subgraph FEED["BACKGROUND FEED - runs every 15 min"]
+        direction LR
+        POLL["Poller<br/>(APScheduler in FastAPI, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
         MISOAPI --> SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
     end
 
-    subgraph INGEST["One-time doc ingestion (polite fetch)"]
+    subgraph ASK["QUESTION TIME"]
+        direction LR
+        USER(["User<br/>(grandma → engineer)"]) --> UI["Chat UI<br/>(Streamlit)"]
+        UI --> API["FastAPI backend<br/>(GitHub repo)"]
+        API --> CLAUDE["Claude (Opus 5)<br/>answers w/ retrieved ctx"]
+    end
+
+    DB[("Chroma vector DB - the ONLY store<br/>live snapshots (upserted) + docs (one-time)")]
+
+    subgraph INGEST["ONE-TIME DOC INGESTION"]
+        direction LR
         DOCS["MISO docs & reports<br/>(Fact Sheet, Market Reports)"] --> LI["LlamaIndex pipeline<br/>load → CHUNK → embed"]
     end
 
-    subgraph ASK["Question time"]
-        USER(["User<br/>(grandma → engineer)"]) --> UI["Chat UI<br/>(Streamlit)"]
-        UI --> API["FastAPI backend"]
-        API --> CLAUDE["Claude<br/>+ LlamaIndex retriever"]
-    end
+    SUMM -- "UPSERT via LlamaIndex (no chunking -<br/>snapshots are small): one doc per<br/>endpoint, fixed ID - replaces old" --> DB
+    CLAUDE -- "search_docs() = LlamaIndex<br/>retriever → top chunks" --> DB
+    LI -- "runs ONCE (polite fetch)" --> DB
+    CLAUDE -. "answer + 'as of 6:55 PM' + source link" .-> USER
 
-    SUMM -- "UPSERT: fixed doc_id per endpoint,<br/>replaces old snapshot (no chunking)" --> DB[("Chroma vector DB<br/>live snapshots + docs")]
-    LI -- "runs ONCE" --> DB
-    CLAUDE -- "search_docs() → top chunks" --> DB
-    MISOAPI -. "raw JSON appended" .-> SQL[("SQLite<br/>history + dashboard")]
-    CLAUDE -. "answer + 'as of &lt;time&gt;' + source link" .-> USER
+    N1["RULE: never APPEND snapshots.<br/>UPSERT/overwrite - or search<br/>retrieves stale data."]
+    N2["Tradeoff (own it to judges):<br/>answers ≤15 min stale, but ZERO<br/>live dependencies on demo day"]
+    N3["Chroma is the only store.<br/>Poller dies? Last snapshot stays -<br/>degrades gracefully, never breaks"]
+    N4["No answer? Graceful handoff to<br/>MISO contact form (humans keep<br/>only the hard questions)"]
+
+    classDef note fill:#fff9db,stroke:#f08c00,color:#1e1e1e
+    classDef rule fill:#ffc9c9,stroke:#e03131,color:#1e1e1e
+    class N2,N3,N4 note
+    class N1 rule
 ```
 
 ## The problem
@@ -47,7 +61,6 @@ a source link, sourced from MISO's own public data.
 ```
 BACKGROUND (every 15 min)
   Poller → MISO public APIs → JSON→plain-English snapshot → UPSERT into Chroma (fixed IDs)
-                             └→ raw JSON appended to SQLite (history + dashboard)
 
 ONE-TIME
   MISO docs & reports → LlamaIndex pipeline (load → chunk → embed) → Chroma
@@ -108,7 +121,7 @@ app.py            # Streamlit chat UI (this is here now)
 docs/             # architecture diagram: arch-v1.png + editable .excalidraw source
 backend/          # FastAPI app: /ask endpoint, poller, summarizers
 ingest/           # one-time LlamaIndex document ingestion
-data/             # Chroma persistence + SQLite (gitignored)
+data/             # Chroma persistence (gitignored)
 ```
 
 A full rendering of the architecture lives in [`docs/arch-v1.png`](docs/arch-v1.png);
