@@ -9,9 +9,11 @@ import json
 import os
 import re
 
+import pandas as pd
 import requests
 import streamlit as st
 
+# Matches the ```chart fenced JSON blocks the backend puts in answers.
 CHART_BLOCK = re.compile(r"```chart\s*\n(.*?)```", re.DOTALL)
 
 BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "http://localhost:8000")
@@ -49,37 +51,45 @@ st.title("MISO Copilot")
 st.caption("The front door to MISO's public data. Ask in plain English.")
 
 
+def render_chart(spec_json: str) -> None:
+    """Render one ```chart block; falls back to showing the raw JSON."""
+    try:
+        cfg = json.loads(spec_json)
+        df = pd.DataFrame(
+            {s["name"]: [float(v) for v in s["data"]] for s in cfg["series"]},
+            index=[str(label) for label in cfg["labels"]],
+        )
+    except (KeyError, ValueError, TypeError):
+        st.code(spec_json, language="json")
+        return
+
+    if cfg.get("title"):
+        st.caption(cfg["title"])
+
+    kind = cfg.get("type", "line")
+    if kind == "area":
+        st.area_chart(df)
+    elif kind == "bar" or kind == "pie":
+        # Streamlit has no native pie chart, so pie falls back to bars.
+        st.bar_chart(df)
+    else:
+        st.line_chart(df)
+
+
 def render_answer(markdown_text: str) -> None:
     """Render an answer: markdown (incl. $LaTeX$ and tables) via st.markdown,
-    and ```chart blocks as Streamlit charts."""
-    import pandas as pd
-
+    with ```chart blocks rendered as Streamlit charts in between."""
     pos = 0
     for match in CHART_BLOCK.finditer(markdown_text):
-        before = markdown_text[pos : match.start()]
-        if before.strip():
-            st.markdown(before)
+        text_before_chart = markdown_text[pos : match.start()]
+        if text_before_chart.strip():
+            st.markdown(text_before_chart)
+        render_chart(match.group(1))
         pos = match.end()
-        try:
-            cfg = json.loads(match.group(1))
-            df = pd.DataFrame(
-                {s["name"]: [float(v) for v in s["data"]] for s in cfg["series"]},
-                index=[str(x) for x in cfg["labels"]],
-            )
-            if cfg.get("title"):
-                st.caption(cfg["title"])
-            kind = cfg.get("type", "line")
-            if kind == "area":
-                st.area_chart(df)
-            elif kind in ("bar", "pie"):  # no native pie; bar is the fallback
-                st.bar_chart(df)
-            else:
-                st.line_chart(df)
-        except (KeyError, ValueError, TypeError):
-            st.code(match.group(1), language="json")
-    rest = markdown_text[pos:]
-    if rest.strip():
-        st.markdown(rest)
+
+    text_after_last_chart = markdown_text[pos:]
+    if text_after_last_chart.strip():
+        st.markdown(text_after_last_chart)
 
 
 def get_answer(question: str) -> str:
