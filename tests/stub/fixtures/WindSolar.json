@@ -1,0 +1,26 @@
+{
+  "instance": [
+    {
+      "ForecastDateTimeEST": "1970-01-01 12:00:00 AM",
+      "ForecastHourEndingEST": "1",
+      "ForecastWindValue": "100.00",
+      "ForecastSolarValue": "-10.00",
+      "ActualDateTimeEST": "1970-01-01 12:00:00 AM",
+      "ActualHourEndingEST": "1",
+      "ActualWindValue": "90.00",
+      "ActualSolarValue": "-10.50"
+    },
+    {
+      "ForecastDateTimeEST": "1970-01-01 1:00:00 AM",
+      "ForecastHourEndingEST": "2",
+      "ForecastWindValue": "110.00",
+      "ForecastSolarValue": "0.00",
+      "ActualDateTimeEST": null,
+      "ActualHourEndingEST": null,
+      "ActualWindValue": null,
+      "ActualSolarValue": null
+    }
+  ],
+  "RefId": "01-Jan-1970 - Interval 00:00 EST",
+  "MktDay": "01-01-1970"
+}

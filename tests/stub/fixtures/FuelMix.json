@@ -1,0 +1,20 @@
+{
+  "RefId": "01-Jan-1970 - Interval 00:00 EST",
+  "TotalMW": "1000",
+  "Fuel": {
+    "Type": [
+      {
+        "INTERVALEST": "1970-01-01 12:00:00 AM",
+        "CATEGORY": "Coal",
+        "ACT": "600",
+        "FUEL_CATEGORY": "Coal"
+      },
+      {
+        "INTERVALEST": "1970-01-01 12:00:00 AM",
+        "CATEGORY": "Wind",
+        "ACT": "400",
+        "FUEL_CATEGORY": "Wind"
+      }
+    ]
+  }
+}

@@ -25,12 +25,14 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   routes/                   #   /ask and /health endpoints
   llm/                      #   Claude client + system prompt
   rag/                      #   (planned) Chroma + LlamaIndex retrieval - see its README
-  poller/                   #   (planned) 15-min poller + summarizers - see its README
+  poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
 docs/                       # architecture diagram (arch-v1.png + .excalidraw source)
 ingest/                     # (planned) one-time LlamaIndex document ingestion
-data/                       # Chroma persistence - gitignored, never commit
+data/                       # gitignored, never commit. Chroma persistence, plus
+                            #   data/raw/ (poller output) and data/raw.backup/
+                            #   (demo fallback)
 requirements.txt            # deps stay commented until the code that imports them lands
 ```
 
@@ -50,6 +52,24 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn backend.main:app --reload --port 8000
 ```
+
+Two rules for running the backend, because the poller lives inside it:
+
+- **One worker.** Never `--workers N` - the poller's scheduler starts in every
+  worker, and N schedulers contending on one lease file is waste nobody should
+  have to debug on demo morning.
+- **One machine at a time.** The rate guard is a local file and cannot see
+  another laptop. On demo day the whole team is behind one public IP in MISO's
+  own building.
+
+`--reload` is safe and stays: the guard claims a per-link lease before each
+request, so a reload mid-cycle cannot double-hit an endpoint. Do not remove it
+thinking it breaks the rate limit. To run the API without the poller at all,
+set `MISO_POLLER_ENABLED=0`.
+
+Poller commands (`--once`, `--loop`, `--status`) are in
+`backend/poller/README.md`. `python -m backend.poller --status` is the
+one-command answer to "is the feed live right now?".
 
 Streamlit UI (fallback):
 
@@ -75,23 +95,27 @@ frontend/UI_RULES.md §11.
 The design is **pull-based RAG** - deliberate team decisions, not accidents:
 
 1. **No live MISO API calls at question time.** A background poller (APScheduler
-   inside FastAPI, every 15 min) fetches endpoints and writes snapshots into Chroma.
-   Question time only reads Chroma. This keeps the demo alive even if MISO's APIs go
-   down. Answers may be ≤15 min stale - that's accepted and disclosed.
+   inside FastAPI, every 5 min) fetches the four MISO endpoints and writes their
+   JSON **verbatim** into `data/raw/`. The RAG lane reads those files and writes
+   Chroma; question time only reads Chroma. This keeps the demo alive even if
+   MISO's APIs go down. Answers may be about 10 min stale (the 5-min cadence plus
+   MISO's own publication lag) - that's accepted and disclosed.
 2. **Chroma is the ONLY store.** No SQLite, no extra databases. Question logging, if
    added, is a plain JSONL file.
-3. **UPSERT, never append.** One document per API endpoint with a **fixed doc_id**,
-   overwritten each poll cycle. Appending snapshots makes vector search retrieve
-   stale near-duplicates.
-4. **JSON → prose before embedding.** Snapshots are stored as natural-language
-   paragraphs ("As of 6:55 PM EST, total generation is 114,136 MW…"), never raw
-   JSON. Raw numbers embed terribly.
+3. **UPSERT, never append.** The RAG lane keeps one document per API endpoint with
+   a **fixed doc_id**, overwritten each poll cycle. Appending snapshots makes vector
+   search retrieve stale near-duplicates.
+4. **JSON → prose before embedding.** This is the **RAG lane's** job, not the
+   poller's: it reads `data/raw/*.json` and stores natural-language paragraphs
+   ("As of 6:55 PM EST, total generation is 114,136 MW…"), never raw JSON. Raw
+   numbers embed terribly.
 5. **Timestamp in every snapshot**, and the system prompt must force "as of <time>"
    into answers - staleness stays visible, never hidden.
 6. **Citations on every doc-lane answer.** The source URL is the product.
 7. **RAG framework is LlamaIndex** (the Python library). Docs: load →
    `SentenceSplitter` chunks (~512 tokens, ~50 overlap) → embed → Chroma. Poller
-   snapshots: single small `Document` with fixed `doc_id`, **no chunking**.
+   snapshots: the RAG lane builds a single small `Document` per endpoint from
+   `data/raw/`, with a fixed `doc_id` and **no chunking**.
    Query: `index.as_retriever(similarity_top_k=4)` over the same collection.
 8. **Embeddings are local** (sentence-transformers all-MiniLM-L6-v2). LLM is Claude
    via the Anthropic API with a single tool, `search_docs(query)`.
@@ -103,8 +127,10 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - **Do NOT scrape miso.org.** It has anti-scraping protection; scrapers get
   IP-banned. Use the public APIs and politely-fetched documents only.
 - **Rate limit: max ~1 request per endpoint per minute** against
-  `https://public-api.misoenergy.org` (free JSON, no auth). The 15-min poller is
-  already far under this - keep it that way.
+  `https://public-api.misoenergy.org` (free JSON, no auth). The 5-min poller is
+  already far under this, and a per-link lease in
+  `~/.cache/miso-copilot/rate-guard.json` enforces it before every request - keep
+  both.
 - API values come back as **strings**, not numbers - parse before doing math.
 - MISO is mid-migration to the MISO Data Exchange API (pricing/load endpoints moving
   after Sept 30) - don't hard-fail if an endpoint disappears; degrade to the last
