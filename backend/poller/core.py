@@ -9,12 +9,20 @@ Two deliberate exceptions to "does not interpret": a shape gate that rejects
 HTML error pages and empty payloads, and a `ref_id` lifted out of each payload
 so that a frozen feed is visible in the status file.
 
+Every endpoint entry in `_status.json` carries an `outcome` of "ok", "failed"
+or "skipped". It is the only field describing THIS cycle and nothing else:
+`consecutive_failures`, `last_success` and `ref_id` are carried forward across
+cycles on purpose, so none of them can tell a cycle where everything failed
+from one where a rate-guard skip inherited a zero from an earlier success.
+Exit codes are read from `outcome` for exactly that reason.
+
 Entry point is poll_once(). See the specification, sections 5 and 6.
 """
 
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -204,6 +212,11 @@ def time_now() -> float:
 
 # --- status file ------------------------------------------------------------
 
+# The shape every endpoint entry is built from, and the only keys carried
+# forward by _usable_entry. `outcome` is deliberately absent: it describes one
+# cycle, so it must be written fresh each cycle and never inherited. Leaving it
+# out means a stale value cannot survive a merge even if a future code path
+# forgets to set it.
 INITIAL_ENTRY = {
     "last_attempt": None,
     "last_success": None,
@@ -336,6 +349,101 @@ def _fetch(endpoint: dict, url: str) -> dict:
             "ref_id": ref_id, "content": response.content}
 
 
+# --- one endpoint, end to end -----------------------------------------------
+
+def _poll_endpoint(endpoint: dict, url: str, entry: dict, directory: Path,
+                   stub: bool) -> None:
+    """Claim, fetch, validate and write one endpoint. Mutates `entry` in place.
+
+    Every path through this function sets `entry["outcome"]`, because that is
+    what the cycle's exit code is read from. Lifted out of poll_once so the
+    caller can wrap one endpoint's work in a single except clause without
+    that clause swallowing the loop itself.
+    """
+    key = endpoint["key"]
+
+    if not stub and not guard.claim(url):
+        # last_error is deliberately left as it was. An endpoint that has
+        # failed five times with HTTP 503 and is then guard-skipped must still
+        # report the 503: the operator reading this file is debugging that
+        # incident, and "rate guard" would send them after the wrong thing.
+        # The skip is not lost - outcome records it, and guard.claim logged it.
+        entry["outcome"] = "skipped"
+        return
+
+    result = _fetch(endpoint, url)
+    moment = now()
+    entry["last_attempt"] = moment.isoformat()
+    entry["http_status"] = result.get("http_status")
+    entry["bytes"] = result.get("bytes")
+
+    if not result["ok"]:
+        entry["outcome"] = "failed"
+        entry["consecutive_failures"] += 1
+        entry["last_error"] = result["error"]
+        log.warning("%s failed: %s", key, result["error"])
+        return
+
+    try:
+        write_atomic(directory / f"{key}.json", result["content"])
+    except OSError as e:
+        entry["outcome"] = "failed"
+        entry["consecutive_failures"] += 1
+        entry["last_error"] = "internal error"
+        log.error("%s: could not write payload (%s)", key, e)
+        return
+
+    if result["ref_id"] != entry.get("ref_id"):
+        entry["ref_id_changed_at"] = moment.isoformat()
+    entry["ref_id"] = result["ref_id"]
+    entry["outcome"] = "ok"
+    entry["consecutive_failures"] = 0
+    entry["last_error"] = None
+    entry["last_success"] = moment.isoformat()
+    log.info("%s ok (%s bytes)", key, result["bytes"])
+
+
+# --- pruning a removed endpoint ---------------------------------------------
+
+# What an endpoint key may look like before we will build a filename from it.
+# The status file is editable by hand, so a key is not trusted to be a safe
+# path component just because it was in there.
+SAFE_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _prune_payloads(directory: Path, previous_endpoints: dict,
+                    current: dict) -> None:
+    """Delete the payload file of any endpoint that has left the table.
+
+    Specification 6.1: a pruned status entry whose .json is still sitting
+    beside it leaves the RAG lane a file that parses, passes a shape check,
+    looks live, and has no provenance anywhere.
+
+    Only the exact filename of a key we just pruned is unlinked - never a
+    glob, never _status.json, and never a key whose text could name something
+    else in the directory.
+    """
+    for key in previous_endpoints:
+        if key in current:
+            continue
+        if not isinstance(key, str) or not SAFE_KEY.fullmatch(key):
+            log.warning("pruned an unrecognized endpoint key %r, "
+                        "leaving any file of its name alone", key)
+            continue
+        target = directory / f"{key}.json"
+        if target == status_path(directory):
+            continue
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            log.warning("pruned %s but could not delete %s (%s)",
+                        key, target.name, e)
+            continue
+        log.info("pruned endpoint %s, deleted %s", key, target.name)
+
+
 # --- one full cycle ---------------------------------------------------------
 
 def poll_once() -> dict:
@@ -364,60 +472,37 @@ def poll_once() -> dict:
     started = now()
 
     results = {}
-    attempted = 0
     for endpoint in ENDPOINTS:
         key = endpoint["key"]
-        url = base + endpoint["path"]
         entry = _usable_entry(previous_endpoints.get(key))
         entry["path"] = endpoint["path"]
-
-        if stub:
-            outcome = _fetch(endpoint, url)
-            attempted += 1
-        else:
-            with guard.claim(url, now()) as allowed:
-                if not allowed:
-                    entry["last_error"] = "rate guard"
-                    results[key] = entry
-                    continue
-                outcome = _fetch(endpoint, url)
-                attempted += 1
-
-        moment = now()
-        entry["last_attempt"] = moment.isoformat()
-        entry["http_status"] = outcome.get("http_status")
-        entry["bytes"] = outcome.get("bytes")
-
-        if not outcome["ok"]:
-            entry["consecutive_failures"] += 1
-            entry["last_error"] = outcome["error"]
-            log.warning("%s failed: %s", key, outcome["error"])
-            results[key] = entry
-            continue
-
         try:
-            write_atomic(directory / f"{key}.json", outcome["content"])
-        except OSError as e:
+            _poll_endpoint(endpoint, base + endpoint["path"], entry,
+                           directory, stub)
+        except Exception:
+            # Specification section 7: any exception in one endpoint is
+            # recorded and the other three still run. A RecursionError out of
+            # json.loads on a deeply nested body is the case that proved this
+            # necessary - it is not a ValueError, so it escaped _fetch, killed
+            # the cycle, and _status.json was never written at all.
+            log.exception("%s: unexpected failure", key)
+            entry["outcome"] = "failed"
             entry["consecutive_failures"] += 1
             entry["last_error"] = "internal error"
-            log.error("%s: could not write payload (%s)", key, e)
-            results[key] = entry
-            continue
-
-        if outcome["ref_id"] != entry.get("ref_id"):
-            entry["ref_id_changed_at"] = moment.isoformat()
-        entry["ref_id"] = outcome["ref_id"]
-        entry["consecutive_failures"] = 0
-        entry["last_error"] = None
-        entry["last_success"] = moment.isoformat()
-        log.info("%s ok (%s bytes)", key, outcome["bytes"])
         results[key] = entry
 
-    if attempted == 0:
+    # Read from this cycle's outcomes, not from a counter: "nothing was
+    # attempted" is exit 2 and "nothing succeeded" is exit 1, and a counter
+    # incremented mid-loop cannot say which one an internal error belongs to.
+    if all(entry.get("outcome") == "skipped" for entry in results.values()):
         log.warning("every endpoint was skipped by the rate guard")
         skipped = dict(previous) if previous else {"endpoints": results}
         skipped["skipped"] = True
         return skipped
+
+    # Only when the file is actually being rewritten - a fully skipped cycle
+    # leaves the old entries in place, so their payloads stay too.
+    _prune_payloads(directory, previous_endpoints, results)
 
     status = {
         "base_url": base,
@@ -433,10 +518,12 @@ def poll_once() -> dict:
 def succeeded_count(status: dict) -> int:
     """How many endpoints succeeded in the cycle this status describes.
 
-    Counted from consecutive_failures, not last_success: last_success is
-    carried forward from earlier cycles and would report success after a
-    total outage.
+    Read from `outcome`, which records what happened this cycle. No
+    carried-forward field can answer this question: last_success survives a
+    total outage, and consecutive_failures is left untouched by a rate-guard
+    skip, so a skipped endpoint kept the 0 an earlier success had put there
+    and a cycle of three 503s plus one skip reported a success.
     """
     endpoints = status.get("endpoints", {})
     return sum(1 for e in endpoints.values()
-               if isinstance(e, dict) and e.get("consecutive_failures") == 0)
+               if isinstance(e, dict) and e.get("outcome") == "ok")

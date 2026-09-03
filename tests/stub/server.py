@@ -12,10 +12,11 @@ Run it from the command line:
 
 or run it inside a test:
 
-    httpd, thread = serve_in_thread(mode="redirect")
+    httpd, thread = serve_in_thread(modes=["redirect"])
     base = f"http://127.0.0.1:{httpd.server_port}"
     ...
     httpd.shutdown()
+    httpd.server_close()
 
 Control endpoints, none of which are counted as link requests:
 
@@ -284,14 +285,44 @@ class StubHandler(BaseHTTPRequestHandler):
         self._send(status, headers, body)
 
 
+class StubServer(ThreadingHTTPServer):
+    """A ThreadingHTTPServer that can be shut down before it ever served.
+
+    BaseServer.shutdown() blocks on a flag that only serve_forever()'s
+    finally clause ever sets, so shutting down a server that was built and
+    never served waits forever. Building is a separate step from serving
+    here, and a caller that gives up in between - a fixture that fails after
+    make_server(), a test that decides it does not need the stub after all -
+    must still be able to stop it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.serving = threading.Event()
+
+    def serve_forever(self, *args, **kwargs):
+        self.serving.set()
+        try:
+            super().serve_forever(*args, **kwargs)
+        finally:
+            self.serving.clear()
+
+    def shutdown(self) -> None:
+        """Stop serve_forever(). Does nothing if it is not running."""
+        if self.serving.is_set():
+            super().shutdown()
+
+
 def make_server(port: int = 0, modes=None, fail_endpoint: str = "FuelMix",
                 rotate_ref_id: bool = True, verbose: bool = False):
     """Build a stub bound to 127.0.0.1. Port 0 asks the OS for a free one.
 
     The caller runs it: serve_forever() for a script, serve_in_thread() for
-    a test. Read the chosen port off httpd.server_port.
+    a test. Read the chosen port off httpd.server_port. Stop it with
+    httpd.shutdown() then httpd.server_close(), which is safe whether or not
+    it ever started serving.
     """
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), StubHandler)
+    httpd = StubServer(("127.0.0.1", port), StubHandler)
     httpd.daemon_threads = True
     httpd.state = StubState(modes=modes, fail_endpoint=fail_endpoint,
                             rotate_ref_id=rotate_ref_id)
@@ -303,13 +334,16 @@ def serve_in_thread(port: int = 0, modes=None, fail_endpoint: str = "FuelMix",
                     rotate_ref_id: bool = True, verbose: bool = False):
     """Start a stub on a daemon thread. Returns (httpd, thread).
 
-    Stop it with httpd.shutdown() then httpd.server_close().
+    Stop it with httpd.shutdown() then httpd.server_close(). Returns only
+    once the thread is actually serving, so a caller that stops it on the
+    next line stops a server that started.
     """
     httpd = make_server(port=port, modes=modes, fail_endpoint=fail_endpoint,
                         rotate_ref_id=rotate_ref_id, verbose=verbose)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True,
                               name="miso-stub")
     thread.start()
+    httpd.serving.wait(5)
     return httpd, thread
 
 
