@@ -22,6 +22,7 @@ can disable it.
 See the specification, section 4.3.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -84,7 +85,10 @@ def _read(path: Path) -> dict:
     except OSError as e:
         # strerror, not the whole OSError: the caller logs the path itself.
         raise GuardUnreadable(f"cannot read lease file ({e.strerror})") from e
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
+        # RecursionError alongside ValueError because json raises it, not
+        # ValueError, on a deeply nested file. Either way the leases are
+        # unreadable, and an unreadable guard fails closed.
         raise GuardUnreadable(f"lease file is not valid JSON ({e})") from e
     if not isinstance(data, dict):
         raise GuardUnreadable("lease file is not a JSON object")
@@ -201,8 +205,39 @@ def claim(url: str) -> bool:
         _unlock(handle)
 
 
+@contextlib.contextmanager
+def file_lock(path: Path):
+    """Hold an exclusive lock beside `path` for the body of the `with`.
+
+    Public so that core can serialize its own read-merge-write of
+    _status.json without growing a second flock implementation. The caller
+    picks `path`, and the status file's lock is therefore a different file
+    from the lease file's. One lock for both would make every status write
+    queue behind whichever process is currently claiming a lease, coupling
+    two things that have no reason to wait on each other.
+
+    A lock we cannot take is logged and the body runs anyway. Refusing to
+    write the status file at all is worse than the interleaving this
+    serializes, and it is what happened before this lock existed.
+
+    Never hold this across a network call. LOCK_TIMEOUT_SECONDS is shorter
+    than one fetch timeout, so a waiter would give up and lose its lock.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = _lock(path)
+    except OSError as e:
+        log.warning("could not lock %s (%s), proceeding unserialized", path, e)
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        _unlock(handle)
+
+
 def _lock(path: Path):
-    """Take an exclusive lock beside the lease file, waiting briefly if held."""
+    """Take an exclusive lock beside the given file, waiting briefly if held."""
     lock_file = path.with_suffix(".lock")
     handle = open(lock_file, "w")
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS

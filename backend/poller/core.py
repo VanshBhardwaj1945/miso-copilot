@@ -19,6 +19,7 @@ Exit codes are read from `outcome` for exactly that reason.
 Entry point is poll_once(). See the specification, sections 5 and 6.
 """
 
+import ipaddress
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -110,7 +112,11 @@ def raw_dir() -> Path:
     """
     override = os.environ.get("MISO_RAW_DIR")
     if override:
-        return Path(override).expanduser()
+        # Resolved, because specification 6.3 defines `raw_dir` in the status
+        # file as the absolute directory actually written. A relative override
+        # recorded verbatim as "relraw" identifies nothing, which defeats the
+        # only reason the field exists. The default below is already absolute.
+        return Path(override).expanduser().resolve()
     return Path(__file__).resolve().parent.parent.parent / "data" / "raw"
 
 
@@ -141,12 +147,36 @@ def poller_enabled() -> bool:
 
 
 def using_stub() -> bool:
-    """True when pointed somewhere other than MISO.
+    """True only when the base URL provably names this machine.
 
-    The rate guard applies only to MISO. A local stub has no rate limit, and
-    guarding it would silently cancel MISO_POLL_SECONDS below 60.
+    A local stub has no rate limit and guarding it would silently cancel
+    MISO_POLL_SECONDS below 60, so the bypass has to exist. But it has to
+    turn on the destination, not the spelling. Comparing the base string to
+    DEFAULT_BASE_URL answered the wrong question: `http://`, a capitalized
+    host, an explicit `:443` and a trailing dot are four different strings
+    that all reach MISO, and each one of them switched the guard off while
+    every request still went to an organization that IP-bans.
+
+    So the test is inverted. Loopback bypasses; anything else is guarded.
+    A hostname nobody anticipated - a typo, a proxy, a new spelling - then
+    fails safe, at the price of one guarded stub for anyone who binds a stub
+    to a non-loopback address.
+
+    No DNS. This decides in front of every fetch, and a resolver that maps
+    some name onto 127.0.0.1 is not worth a lookup in that path.
     """
-    return base_url() != DEFAULT_BASE_URL
+    host = urlsplit(base_url()).hostname
+    if host is None:
+        return False
+    # The root label is legal in a hostname and changes nothing about where
+    # the request lands, here or at MISO.
+    host = host.rstrip(".")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def now() -> datetime:
@@ -172,7 +202,15 @@ def write_atomic(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     try:
-        with os.fdopen(fd, "wb") as handle:
+        # os.fdopen takes ownership of the descriptor only once it returns.
+        # If it raises - MemoryError is the realistic way - nothing else will
+        # ever close fd, and the process leaks one descriptor per call.
+        try:
+            handle = os.fdopen(fd, "wb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
@@ -239,12 +277,17 @@ def read_status(directory: Path) -> dict:
     Missing, unparseable, or valid JSON that is not an object with an
     `endpoints` object all mean the same thing: start over. A file holding
     `[]` or `null` parses fine and is still no use.
+
+    RecursionError is in the tuple because a deeply nested file is exactly
+    the corrupt one an operator runs --status to inspect, and json raises it
+    rather than ValueError. Letting it escape killed both --once and the
+    diagnostic meant to explain why.
     """
     try:
         data = json.loads(status_path(directory).read_text())
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         log.warning("status file unreadable (%s), starting fresh", e)
         return {}
     if not isinstance(data, dict) or not isinstance(data.get("endpoints"), dict):
@@ -261,9 +304,13 @@ def _usable_entry(entry) -> dict:
     """
     if not isinstance(entry, dict):
         return dict(INITIAL_ENTRY)
-    if not isinstance(entry.get("consecutive_failures"), int):
+    failures = entry.get("consecutive_failures")
+    # bool before int: True is an instance of int, so a hand-edited
+    # "consecutive_failures": true passed this gate and counted up from 1.
+    # Specification 6.1 asks for a non-negative integer, and true is not one.
+    if isinstance(failures, bool) or not isinstance(failures, int):
         return dict(INITIAL_ENTRY)
-    if entry["consecutive_failures"] < 0:
+    if failures < 0:
         return dict(INITIAL_ENTRY)
     for field in ("last_attempt", "last_success", "ref_id_changed_at"):
         value = entry.get(field)
@@ -332,7 +379,11 @@ def _fetch(endpoint: dict, url: str) -> dict:
 
     try:
         body = json.loads(response.content)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # A body nested thousands of levels deep raises RecursionError, not
+        # ValueError. It is still a payload we cannot parse, and reporting it
+        # as "internal error" pointed the operator at our code instead of at
+        # what the server sent.
         return {"ok": False, "error": "invalid JSON",
                 "http_status": status, "bytes": size}
 
@@ -351,14 +402,19 @@ def _fetch(endpoint: dict, url: str) -> dict:
 
 # --- one endpoint, end to end -----------------------------------------------
 
-def _poll_endpoint(endpoint: dict, url: str, entry: dict, directory: Path,
-                   stub: bool) -> None:
-    """Claim, fetch, validate and write one endpoint. Mutates `entry` in place.
+def _poll_endpoint(endpoint: dict, url: str, directory: Path,
+                   stub: bool) -> dict:
+    """Claim, fetch, validate and write one endpoint. Returns what it observed.
 
-    Every path through this function sets `entry["outcome"]`, because that is
-    what the cycle's exit code is read from. Lifted out of poll_once so the
-    caller can wrap one endpoint's work in a single except clause without
-    that clause swallowing the loop itself.
+    Every path returns an `outcome`, because that is what the cycle's exit
+    code is read from. Lifted out of poll_once so the caller can wrap one
+    endpoint's work in a single except clause without that clause swallowing
+    the loop itself.
+
+    Nothing here reads the stored status. The observation describes only this
+    cycle, and _merge_observation folds it onto the stored entry later, under
+    the status lock. That separation is what keeps a network request out of
+    that lock while still making the read-merge-write one critical section.
     """
     key = endpoint["key"]
 
@@ -368,39 +424,69 @@ def _poll_endpoint(endpoint: dict, url: str, entry: dict, directory: Path,
         # report the 503: the operator reading this file is debugging that
         # incident, and "rate guard" would send them after the wrong thing.
         # The skip is not lost - outcome records it, and guard.claim logged it.
-        entry["outcome"] = "skipped"
-        return
+        return {"outcome": "skipped"}
 
     result = _fetch(endpoint, url)
-    moment = now()
-    entry["last_attempt"] = moment.isoformat()
-    entry["http_status"] = result.get("http_status")
-    entry["bytes"] = result.get("bytes")
+    observed = {
+        "outcome": "failed",
+        "last_attempt": now().isoformat(),
+        "http_status": result.get("http_status"),
+        "bytes": result.get("bytes"),
+        "last_error": result.get("error"),
+        "ref_id": None,
+    }
 
     if not result["ok"]:
-        entry["outcome"] = "failed"
-        entry["consecutive_failures"] += 1
-        entry["last_error"] = result["error"]
         log.warning("%s failed: %s", key, result["error"])
-        return
+        return observed
 
     try:
         write_atomic(directory / f"{key}.json", result["content"])
     except OSError as e:
-        entry["outcome"] = "failed"
-        entry["consecutive_failures"] += 1
-        entry["last_error"] = "internal error"
+        observed["last_error"] = "internal error"
         log.error("%s: could not write payload (%s)", key, e)
+        return observed
+
+    observed["outcome"] = "ok"
+    observed["last_error"] = None
+    observed["ref_id"] = result["ref_id"]
+    log.info("%s ok (%s bytes)", key, result["bytes"])
+    return observed
+
+
+def _internal_error_observation() -> dict:
+    """What an endpoint that raised out of _poll_endpoint leaves behind."""
+    return {"outcome": "failed", "last_attempt": now().isoformat(),
+            "http_status": None, "bytes": None,
+            "last_error": "internal error", "ref_id": None}
+
+
+def _merge_observation(entry: dict, observed: dict) -> None:
+    """Fold one cycle's observation onto the stored entry. Mutates `entry`.
+
+    `consecutive_failures`, `last_success`, `ref_id` and `ref_id_changed_at`
+    are carried forward from `entry`, so `entry` must be the version read
+    under the status lock and not the one that was current before the fetch.
+    """
+    entry["outcome"] = observed["outcome"]
+    if observed["outcome"] == "skipped":
         return
 
-    if result["ref_id"] != entry.get("ref_id"):
-        entry["ref_id_changed_at"] = moment.isoformat()
-    entry["ref_id"] = result["ref_id"]
-    entry["outcome"] = "ok"
+    entry["last_attempt"] = observed["last_attempt"]
+    entry["http_status"] = observed["http_status"]
+    entry["bytes"] = observed["bytes"]
+
+    if observed["outcome"] == "failed":
+        entry["consecutive_failures"] += 1
+        entry["last_error"] = observed["last_error"]
+        return
+
+    if observed["ref_id"] != entry.get("ref_id"):
+        entry["ref_id_changed_at"] = observed["last_attempt"]
+    entry["ref_id"] = observed["ref_id"]
     entry["consecutive_failures"] = 0
     entry["last_error"] = None
-    entry["last_success"] = moment.isoformat()
-    log.info("%s ok (%s bytes)", key, result["bytes"])
+    entry["last_success"] = observed["last_attempt"]
 
 
 # --- pruning a removed endpoint ---------------------------------------------
@@ -423,6 +509,11 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
     glob, never _status.json, and never a key whose text could name something
     else in the directory.
     """
+    # Compared case-foldedly because this machine's filesystem is. A Path
+    # equality test is case-sensitive wherever it runs, so on APFS a status
+    # entry keyed "_STATUS" named a different Path, compared unequal, and
+    # unlinked the real status file.
+    status_key = status_path(directory).stem.casefold()
     for key in previous_endpoints:
         if key in current:
             continue
@@ -430,9 +521,11 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
             log.warning("pruned an unrecognized endpoint key %r, "
                         "leaving any file of its name alone", key)
             continue
-        target = directory / f"{key}.json"
-        if target == status_path(directory):
+        if key.casefold() == status_key:
+            log.warning("pruned endpoint key %r names the status file, "
+                        "leaving it alone", key)
             continue
+        target = directory / f"{key}.json"
         try:
             target.unlink()
         except FileNotFoundError:
@@ -462,56 +555,85 @@ def poll_once() -> dict:
 
     base = base_url()
     stub = using_stub()
-    if stub:
-        log.warning("MISO_API_BASE is %s, not MISO - rate guard bypassed", base)
+    if base != DEFAULT_BASE_URL:
+        # Specification 8.6 wants a non-default base to be loud every cycle.
+        # Whether the guard is on is a separate sentence, because a
+        # non-default base that is not loopback still reaches MISO and is
+        # still guarded, and an operator skimming the log must be able to
+        # tell the two apart at a glance.
+        if stub:
+            log.warning("MISO_API_BASE is %s - loopback, RATE GUARD BYPASSED",
+                        base)
+        else:
+            log.warning("MISO_API_BASE is %s - not loopback, rate guard ACTIVE",
+                        base)
     if os.environ.get("MISO_RAW_DIR"):
         log.warning("MISO_RAW_DIR is set, writing to %s", directory)
 
-    previous = read_status(directory)
-    previous_endpoints = previous.get("endpoints", {})
     started = now()
 
-    results = {}
+    # Every network request happens here, with no lock of ours held. The
+    # status file is not read yet: anything read before the fetches is stale
+    # by the time they finish, and merging onto a stale entry is how two
+    # concurrent cycles each counted one failure where there were two.
+    observations = {}
     for endpoint in ENDPOINTS:
         key = endpoint["key"]
-        entry = _usable_entry(previous_endpoints.get(key))
-        entry["path"] = endpoint["path"]
         try:
-            _poll_endpoint(endpoint, base + endpoint["path"], entry,
-                           directory, stub)
+            observations[key] = _poll_endpoint(
+                endpoint, base + endpoint["path"], directory, stub)
         except Exception:
             # Specification section 7: any exception in one endpoint is
-            # recorded and the other three still run. A RecursionError out of
-            # json.loads on a deeply nested body is the case that proved this
-            # necessary - it is not a ValueError, so it escaped _fetch, killed
-            # the cycle, and _status.json was never written at all.
+            # recorded and the other three still run. _fetch now names the
+            # failures it can foresee, so anything arriving here is a bug in
+            # our code and is reported as one.
             log.exception("%s: unexpected failure", key)
-            entry["outcome"] = "failed"
-            entry["consecutive_failures"] += 1
-            entry["last_error"] = "internal error"
-        results[key] = entry
+            observations[key] = _internal_error_observation()
 
     # Read from this cycle's outcomes, not from a counter: "nothing was
     # attempted" is exit 2 and "nothing succeeded" is exit 1, and a counter
     # incremented mid-loop cannot say which one an internal error belongs to.
-    if all(entry.get("outcome") == "skipped" for entry in results.values()):
+    if all(o["outcome"] == "skipped" for o in observations.values()):
         log.warning("every endpoint was skipped by the rate guard")
-        skipped = dict(previous) if previous else {"endpoints": results}
+        # Nothing was fetched, so nothing is rewritten and no lock is needed:
+        # the stored file still describes the last cycle that ran, and its
+        # payloads stay beside it unpruned.
+        previous = read_status(directory)
+        skipped = dict(previous) if previous else {
+            "endpoints": {e["key"]: dict(INITIAL_ENTRY, path=e["path"],
+                                         outcome="skipped")
+                          for e in ENDPOINTS}}
         skipped["skipped"] = True
         return skipped
 
-    # Only when the file is actually being rewritten - a fully skipped cycle
-    # leaves the old entries in place, so their payloads stay too.
-    _prune_payloads(directory, previous_endpoints, results)
+    # Read, merge, prune and write are one critical section. Unserialized,
+    # six concurrent cycles all read the same consecutive_failures and all
+    # wrote it plus one, and a partial overlap let the later writer drop the
+    # earlier one's last_success and ref_id. The lock file is the raw
+    # directory's, not the rate guard's, so a status write never waits behind
+    # a request lease - and no fetch is inside it, every request above has
+    # already returned.
+    with guard.file_lock(status_path(directory)):
+        previous_endpoints = read_status(directory).get("endpoints", {})
+        results = {}
+        for endpoint in ENDPOINTS:
+            key = endpoint["key"]
+            entry = _usable_entry(previous_endpoints.get(key))
+            entry["path"] = endpoint["path"]
+            _merge_observation(entry, observations[key])
+            results[key] = entry
 
-    status = {
-        "base_url": base,
-        "raw_dir": str(directory),
-        "cycle_started_at": started.isoformat(),
-        "cycle_finished_at": now().isoformat(),
-        "endpoints": results,
-    }
-    write_atomic(status_path(directory), json.dumps(status, indent=2).encode())
+        _prune_payloads(directory, previous_endpoints, results)
+
+        status = {
+            "base_url": base,
+            "raw_dir": str(directory),
+            "cycle_started_at": started.isoformat(),
+            "cycle_finished_at": now().isoformat(),
+            "endpoints": results,
+        }
+        write_atomic(status_path(directory),
+                     json.dumps(status, indent=2).encode())
     return status
 
 
