@@ -189,7 +189,7 @@ def run_status() -> int:
         print("MISO poller status")
         print(f"  raw_dir   {directory}")
         print("  No _status.json here yet - no cycle has finished in this")
-        print("  directory. Run: python -m backend.poller --once")
+        print("  directory. Run: .venv/bin/python -m backend.poller --once")
         return EXIT_OK
 
     status = core.read_status(directory)
@@ -197,7 +197,7 @@ def run_status() -> int:
         print("MISO poller status")
         print(f"  raw_dir   {directory}")
         print(f"  {path.name} exists but is not a usable status file.")
-        print("  Run: python -m backend.poller --once")
+        print("  Run: .venv/bin/python -m backend.poller --once")
         return EXIT_OK
 
     print_status(status, directory, core.now())
