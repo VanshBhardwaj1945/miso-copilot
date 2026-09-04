@@ -27,7 +27,8 @@ import requests
 import urllib3
 
 from backend.poller import core
-from tests.support import GOOD_BODIES, GOOD_REF_IDS, FakeResponse
+from tests.support import (GOOD_BODIES, GOOD_REF_IDS, FakeRaw,
+                           FakeResponse)
 
 # A documentation range address. Not loopback, so the rate guard stays on,
 # and not routable, so a request that escapes a patched requests.get dies
@@ -1199,6 +1200,25 @@ def test_a_corrupt_gzip_body_is_a_truncated_response(fake_get):
         b"\x1f\x8b\x08\x00 not actually gzip at all", 200,
         headers={"Content-Encoding": "gzip"}))
     assert observed["error"] == "truncated response"
+
+
+def test_a_redirect_still_records_the_size_of_the_body_it_received(fake_get):
+    # requests drains a redirect's body itself, to free the connection while
+    # it works out where the redirect points, so the streamed read sees
+    # nothing at all. Spec 6.3 says a body that arrived is always counted -
+    # null is reserved for a transport failure where nothing arrived - so
+    # this must not report 0 for 12 bytes that did. Caught by a differential
+    # run against the pre-streaming tree, not by any test.
+    class Drained(FakeResponse):
+        """A redirect as requests hands one over: raw empty, content full."""
+
+        def __init__(self):
+            super().__init__(b"stub: moved\n", 302)
+            self.raw = FakeRaw(b"")
+
+    observed = fetch(fake_get, Drained())
+    assert observed["error"] == "redirect 302"
+    assert observed["bytes"] == len(b"stub: moved\n")
 
 
 def test_a_corrupted_compressed_body_is_a_truncated_response(fake_get):

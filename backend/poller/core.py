@@ -618,7 +618,13 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
 
     size = len(content)
     if 300 <= status < 400:
-        return _fetch_failure(f"redirect {status}", status, size)
+        # requests drains a redirect's body itself, to free the connection
+        # while it works out where the redirect points. That is why the
+        # read above saw nothing: the bytes are already in memory. Falling
+        # back to them costs no read and keeps 6.3's rule that a body which
+        # arrived is always counted, redirect or not.
+        return _fetch_failure(f"redirect {status}", status,
+                              size or len(response.content))
     if status != 200:
         return _fetch_failure(f"HTTP {status}", status, size)
 
