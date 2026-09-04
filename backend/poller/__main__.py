@@ -16,7 +16,6 @@ the one thing worth knowing.
 Logging is configured here and only here. Importing the package must never
 reconfigure a host application's logging.
 
-See the specification, sections 7.1, 8.3 and 8.4.
 """
 
 import argparse
@@ -24,9 +23,10 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any, NoReturn
 
 # Imported for the side effect of loading .env, so MISO_API_BASE and friends
-# work from the file the README trains everyone to use (specification 8.6).
+# work from the file the README trains everyone to use.
 import backend.config  # noqa: F401
 from backend.poller import core
 
@@ -40,6 +40,11 @@ EXIT_SKIPPED = 2
 # frozen. MISO publishes on a 5-minute grid, so three missed publications is
 # a real stall rather than a slow interval.
 FROZEN_AFTER_SECONDS = 900
+
+# The command every "nothing to show you yet" path tells the operator to run.
+# One constant because two paths print it and a status screen that offers two
+# different commands for the same job looks unrehearsed.
+RUN_HINT = ".venv/bin/python -m backend.poller --once"
 
 
 # --- one cycle --------------------------------------------------------------
@@ -69,8 +74,14 @@ def run_once() -> int:
     return EXIT_OK
 
 
-def run_loop() -> int:
-    """Poll now and then forever on the interval. Only Ctrl-C ends it."""
+def run_loop() -> NoReturn:
+    """Poll now and then forever on the interval. Only Ctrl-C ends it.
+
+    NoReturn, not int: there is no break and no return below, so the only way
+    out is KeyboardInterrupt, which main() catches. Each cycle's exit code is
+    deliberately dropped - a long-running poller reports through its log, and
+    one bad cycle is not a reason to stop polling.
+    """
     seconds = core.poll_seconds()
     log.info("polling every %d seconds, Ctrl-C to stop", seconds)
     while True:
@@ -79,7 +90,15 @@ def run_loop() -> int:
         except Exception:
             # One bad cycle must never end the loop. KeyboardInterrupt is not
             # an Exception, so Ctrl-C still gets through.
-            log.error("cycle raised, continuing", exc_info=True)
+            log.exception("cycle raised, continuing")
+        # The sleep runs after the cycle, not alongside it, so the real period
+        # is the cycle's duration plus this interval and drifts a little later
+        # every time. That is the honest reading of "one every
+        # MISO_POLL_SECONDS": a few seconds of drift per cycle is invisible
+        # against MISO's 5-minute publication grid, and a fixed-rate schedule
+        # would have to decide what to do when a cycle overran its own
+        # interval - which is exactly the stacking the FastAPI scheduler
+        # spells out max_instances=1 to prevent.
         time.sleep(seconds)
 
 
@@ -87,10 +106,10 @@ def run_loop() -> int:
 
 def duration_text(seconds: float) -> str:
     """Seconds as a person reads them: 45s, 3m, 2h 5m, 3d 4h."""
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, seconds = divmod(seconds, 60)
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    minutes, _ = divmod(total, 60)
     if minutes < 60:
         return f"{minutes}m"
     hours, minutes = divmod(minutes, 60)
@@ -100,8 +119,15 @@ def duration_text(seconds: float) -> str:
     return f"{days}d {hours}h"
 
 
-def parse_stamp(value) -> datetime | None:
-    """An ISO timestamp from the status file, or None if it is unusable."""
+def parse_stamp(value: object) -> datetime | None:
+    """An ISO timestamp from the status file, or None if it is unusable.
+
+    Naive timestamps are unusable, not merely unwelcome: age_text subtracts
+    what this returns from an offset-aware reference, and mixing an aware and
+    a naive datetime raises TypeError. The status file is hand-editable, so a
+    naive stamp is a thing that can arrive, and printing "unreadable" beats
+    crashing the one command an operator runs to find out what is wrong.
+    """
     if not isinstance(value, str):
         return None
     try:
@@ -111,7 +137,7 @@ def parse_stamp(value) -> datetime | None:
     return moment if moment.tzinfo is not None else None
 
 
-def age_text(value, reference: datetime) -> str:
+def age_text(value: object, reference: datetime) -> str:
     """How long ago a stored timestamp was, phrased for a terminal."""
     if value is None:
         return "never"
@@ -124,15 +150,19 @@ def age_text(value, reference: datetime) -> str:
     return duration_text(seconds) + " ago"
 
 
-def feed_text(entry: dict, has_ref_id: bool, reference: datetime) -> str:
+def feed_text(entry: dict[str, Any], endpoint: core.Endpoint,
+              reference: datetime) -> str:
     """One phrase describing whether this endpoint's data is actually moving.
 
     A feed can be frozen while perfectly healthy: MISO keeps serving 200s,
     last_success marches forward, consecutive_failures stays 0, and the
     numbers never change. The gap between last_success and ref_id_changed_at
     is what makes that visible.
+
+    Takes the endpoint row rather than a boolean derived from it, so the
+    caller does not have to know that "has a ref_id" means ref_path is set.
     """
-    if not has_ref_id:
+    if endpoint.ref_path is None:
         return "n/a - this endpoint has no ref_id"
 
     changed = parse_stamp(entry.get("ref_id_changed_at"))
@@ -146,16 +176,36 @@ def feed_text(entry: dict, has_ref_id: bool, reference: datetime) -> str:
     return f"moving - ref_id changed {since}"
 
 
-def print_status(status: dict, directory: Path, reference: datetime) -> None:
+def _print_header(directory: object, base: str | None = None) -> None:
+    """The opening lines every --status path shares, in one place.
+
+    Three paths print this - a full summary, a missing status file and an
+    unusable one - and they used to print it three times with small
+    variations. Only the full summary has a base_url to show, so that line is
+    optional; everything else is identical by construction.
+    """
+    print("MISO poller status")
+    if base is not None:
+        print(f"  base_url  {base}")
+        if base != core.DEFAULT_BASE_URL:
+            # Only what the test above actually establishes. This compares
+            # strings, and "not the default string" is not "not MISO":
+            # http://, a capitalized host, an explicit :443 and a trailing
+            # dot all reach MISO and all fail this comparison. Calling four
+            # genuine MISO fetches "NOT MISO" on the operator's screen is
+            # worse than saying less. See core.base_is_loopback, which
+            # exists because that comparison answered the wrong question.
+            print("            not the default base - a stub or an override")
+    print(f"  raw_dir   {directory}")
+
+
+def print_status(status: dict[str, Any], directory: Path,
+                 reference: datetime) -> None:
     """Print the whole summary. Reads the given dict, never the network."""
     base = status.get("base_url", "unknown")
     written_dir = status.get("raw_dir", "unknown")
 
-    print("MISO poller status")
-    print(f"  base_url  {base}")
-    if base != core.DEFAULT_BASE_URL:
-        print("            NOT MISO - this status came from a stub or override")
-    print(f"  raw_dir   {written_dir}")
+    _print_header(written_dir, base)
     if str(directory) != str(written_dir):
         print(f"            read from {directory} - the two disagree")
     cycle_age = age_text(status.get("cycle_finished_at"), reference)
@@ -165,14 +215,14 @@ def print_status(status: dict, directory: Path, reference: datetime) -> None:
     endpoints = status.get("endpoints", {})
     print(f"  {'ENDPOINT':<20}{'LAST SUCCESS':<14}{'FAILS':<6}FEED")
     for endpoint in core.ENDPOINTS:
-        key = endpoint["key"]
+        key = endpoint.key
         entry = endpoints.get(key)
         if not isinstance(entry, dict):
             print(f"  {key:<20}{'no entry':<14}{'-':<6}unknown")
             continue
         success = age_text(entry.get("last_success"), reference)
         failures = entry.get("consecutive_failures", "?")
-        feed = feed_text(entry, endpoint["ref_path"] is not None, reference)
+        feed = feed_text(entry, endpoint, reference)
         print(f"  {key:<20}{success:<14}{str(failures):<6}{feed}")
         error = entry.get("last_error")
         if error:
@@ -186,18 +236,16 @@ def run_status() -> int:
     directory = core.raw_dir()
     path = core.status_path(directory)
     if not path.exists():
-        print("MISO poller status")
-        print(f"  raw_dir   {directory}")
+        _print_header(directory)
         print("  No _status.json here yet - no cycle has finished in this")
-        print("  directory. Run: .venv/bin/python -m backend.poller --once")
+        print(f"  directory. Run: {RUN_HINT}")
         return EXIT_OK
 
     status = core.read_status(directory)
     if not status:
-        print("MISO poller status")
-        print(f"  raw_dir   {directory}")
+        _print_header(directory)
         print(f"  {path.name} exists but is not a usable status file.")
-        print("  Run: .venv/bin/python -m backend.poller --once")
+        print(f"  Run: {RUN_HINT}")
         return EXIT_OK
 
     print_status(status, directory, core.now())
@@ -206,7 +254,8 @@ def run_status() -> int:
 
 # --- entry ------------------------------------------------------------------
 
-def parse_args(argv=None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """The parsed command line. argv=None reads sys.argv, as argparse does."""
     parser = argparse.ArgumentParser(
         prog="python -m backend.poller",
         description="Fetch four MISO JSON endpoints into data/raw/.",
@@ -221,7 +270,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Configure logging, pick a door, and return the process exit code."""
     args = parse_args(argv)
 
     # Only here, never at import. INFO rather than DEBUG so that a --once run
@@ -237,10 +287,13 @@ def main(argv=None) -> int:
 
     if args.loop:
         try:
-            return run_loop()
+            # No value to return: run_loop is NoReturn, so the only way past
+            # this call is the Ctrl-C below, and stopping on purpose is a
+            # success.
+            run_loop()
         except KeyboardInterrupt:
             log.info("stopped")
-            return EXIT_OK
+        return EXIT_OK
 
     return run_once()
 

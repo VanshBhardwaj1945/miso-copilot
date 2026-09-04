@@ -1,4 +1,4 @@
-# secrets — never commit API keys
+# secrets - never commit API keys
 .env
 
 # python

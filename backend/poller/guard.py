@@ -12,14 +12,12 @@ The mechanism is a lease claimed BEFORE each request, not after:
         requests.get(...)
 
 `claim` takes its own timestamp, under its own lock, and returns with the lock
-released. Both halves of that sentence are load-bearing and both were once
-wrong - see the docstring on `claim`.
+released. Both of those were once wrong - see the docstring on `claim`.
 
 State lives at ~/.cache/miso-copilot/rate-guard.json, deliberately outside the
 repo and outside data/, so that no MISO_RAW_DIR override and no `rm -rf data/`
 can disable it.
 
-See the specification, section 4.3.
 """
 
 import contextlib
@@ -42,11 +40,11 @@ LOCK_TIMEOUT_SECONDS = 10
 CLOCK_BACKWARD_TOLERANCE = timedelta(seconds=5)
 
 
-class GuardUnreadable(Exception):
+class GuardUnreadableError(Exception):
     """The lease file exists but its contents cannot be trusted.
 
     Distinct from a missing file, which simply means first run. This one is
-    fatal to the cycle: specification 4.3 says a guard that cannot read its
+    fatal to the cycle: a guard that cannot read its
     own state fails closed.
     """
 
@@ -68,15 +66,14 @@ def _now() -> datetime:
     return core.now()
 
 
-def _read(path: Path) -> dict:
-    """Load the lease file. Missing means first run; unusable is an error.
+def _read(path: Path) -> dict[str, str]:
+    """Load the lease file: a mapping of link URL to ISO claim timestamp.
 
-    The two cases are not the same and must not be collapsed. A missing file
-    is the normal cold start and proceeds with an empty set of leases. A file
+    Missing means first run and proceeds with an empty set of leases. A file
     that exists and cannot be read, or that holds something other than a JSON
-    object, means every lease we wrote is invisible to us - returning `{}`
-    there would forget all four leases and fetch all four links immediately,
-    which is exactly the burst the guard exists to prevent.
+    object, is a different case: every lease we wrote is invisible to us, and
+    returning `{}` there would forget all four leases and fetch all four links
+    immediately, which is exactly the burst the guard exists to prevent.
     """
     try:
         data = json.loads(path.read_text())
@@ -84,26 +81,31 @@ def _read(path: Path) -> dict:
         return {}
     except OSError as e:
         # strerror, not the whole OSError: the caller logs the path itself.
-        raise GuardUnreadable(f"cannot read lease file ({e.strerror})") from e
+        raise GuardUnreadableError(
+            f"cannot read lease file ({e.strerror})") from e
     except (ValueError, RecursionError) as e:
         # RecursionError alongside ValueError because json raises it, not
         # ValueError, on a deeply nested file. Either way the leases are
         # unreadable, and an unreadable guard fails closed.
-        raise GuardUnreadable(f"lease file is not valid JSON ({e})") from e
+        raise GuardUnreadableError(f"lease file is not valid JSON ({e})") from e
     if not isinstance(data, dict):
-        raise GuardUnreadable("lease file is not a JSON object")
+        raise GuardUnreadableError("lease file is not a JSON object")
     return data
 
 
-def _decide(stored: str | None, now: datetime) -> tuple[bool, str | None]:
+def _decide(stored: object, now: datetime) -> tuple[bool, str | None]:
     """Should this request proceed? Returns (allowed, warning to log).
+
+    `stored` is whatever the lease file held for this link, which is a
+    hand-editable JSON file - it should be an ISO string but can be any JSON
+    value, which is why fromisoformat's TypeError is caught alongside its
+    ValueError.
 
     An abnormal value *inside* an otherwise readable file proceeds rather
     than blocks: one garbled timestamp among good ones should not stop all
     polling, and a single extra request is a far smaller problem than a dead
-    poller nobody noticed. That reasoning covers bad values only. A file we
-    cannot read at all is a different question and is answered in `_read`,
-    which fails closed as specification 4.3 requires.
+    poller nobody noticed. That covers bad values only. A file we cannot read
+    at all is answered in `_read`, which fails closed instead.
     """
     if stored is None:
         return True, None
@@ -142,22 +144,18 @@ def _decide(stored: str | None, now: datetime) -> tuple[bool, str | None]:
 def claim(url: str) -> bool:
     """Claim the right to request `url`. True when the request may proceed.
 
-    Two properties make this correct, and each replaces something that was
-    measurably broken:
+    The timestamp is read here, under the lock, rather than passed in. A
+    caller-supplied `now` is read before the lock, so the process that wins
+    the lock second compares against a moment older than the lease the winner
+    just wrote; that reads as a clock jump and both processes fetch. Racing
+    four processes on one link used to produce two or three winners.
 
-    The timestamp is read HERE, after the lock is held, not passed in by the
-    caller. A caller-supplied `now` is read before the lock, so the process
-    that wins the lock second compares against a moment older than the lease
-    the winner just wrote. That reads as a negative age - a clock jump - and
-    both processes fetch the same link. Racing four processes on one link
-    used to produce two or three winners.
-
-    The lock covers the read, the decide, and the write, and nothing else.
-    The caller fetches after this function returns, with the lock already
-    released. Holding one global lock across a network request made every
-    other link wait out a fetch it had nothing to do with, and a fetch longer
-    than LOCK_TIMEOUT_SECONDS (routine at timeout=(5, 15)) made the waiter
-    record a rate-guard skip for a link it never requested.
+    The lock covers the read, the decide and the write, and nothing else. The
+    caller fetches after this returns, with the lock already released. Holding
+    one global lock across a network request made every other link wait out a
+    fetch it had nothing to do with, and a fetch longer than
+    LOCK_TIMEOUT_SECONDS (routine at timeout=(5, 15)) made the waiter record a
+    rate-guard skip for a link it never requested.
 
     The lease is written before the request is issued, so a process killed
     mid-fetch still leaves its claim behind. A denied claim writes nothing.
@@ -168,7 +166,8 @@ def claim(url: str) -> bool:
     except OSError as e:
         # Fail closed. A poller that cannot prove it is under the limit does
         # not fetch - better a stale demo than an IP ban.
-        log.error("rate guard: cannot create %s (%s), refusing to fetch", path.parent, e)
+        log.error("rate guard: cannot create %s (%s), refusing to fetch",
+                  path.parent, e)
         return False
 
     try:
@@ -180,7 +179,7 @@ def claim(url: str) -> bool:
     try:
         try:
             leases = _read(path)
-        except GuardUnreadable as e:
+        except GuardUnreadableError as e:
             log.error("rate guard: %s at %s, refusing to fetch", e, path)
             return False
 
@@ -237,7 +236,11 @@ def file_lock(path: Path):
 
 
 def _lock(path: Path):
-    """Take an exclusive lock beside the given file, waiting briefly if held."""
+    """Take an exclusive lock beside the given file, waiting briefly if held.
+
+    Returns an open handle the caller now owns and must hand to `_unlock`.
+    Nothing else closes it or releases the lock.
+    """
     lock_file = path.with_suffix(".lock")
     handle = open(lock_file, "w")
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
@@ -253,7 +256,13 @@ def _lock(path: Path):
 
 
 def _flock(handle) -> None:
-    """Exclusive non-blocking lock. Split out so the import stays POSIX-only."""
+    """Exclusive non-blocking lock. Raises OSError when another process holds it.
+
+    fcntl is imported inside the function, not at module scope, so that
+    `import backend.poller` still succeeds on a platform without it. --status
+    takes no lock and stays usable there; anything that needs a lock fails at
+    the point it needs one.
+    """
     import fcntl
 
     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -261,19 +270,15 @@ def _flock(handle) -> None:
 
 def _unlock(handle) -> None:
     """Release the lock and close the handle, never raising."""
-    try:
+    with contextlib.suppress(OSError):
         import fcntl
 
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass
-    try:
+    with contextlib.suppress(OSError):
         handle.close()
-    except OSError:
-        pass
 
 
-def _write(path: Path, leases: dict) -> None:
+def _write(path: Path, leases: dict[str, str]) -> None:
     """Replace the lease file atomically, so a crash never truncates it.
 
     core is imported here rather than at module scope because core imports

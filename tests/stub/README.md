@@ -1,9 +1,9 @@
 # The MISO stub server
 
-A local stand-in for the MISO public API, so the acceptance criteria in the
-API ingestion specification can be run without touching MISO. It serves the
-four polled links from synthetic fixtures, counts requests per link, and can
-be told to fail in the exact ways the criteria describe.
+A local stand-in for the MISO public API, so the ingestion lane's acceptance
+criteria can be run without touching MISO. It serves the four polled links
+from synthetic fixtures, counts requests per link, and can be told to fail
+in the exact ways the criteria describe.
 
 It binds to `127.0.0.1` and makes no outbound requests. Nothing under
 `backend/` imports it.
@@ -11,9 +11,9 @@ It binds to `127.0.0.1` and makes no outbound requests. Nothing under
 ## Fixtures are synthetic, and no MISO data is ever committed
 
 `fixtures/*.json` are hand-written minimal payloads. They are not captures.
-They mimic the structure recorded in `miso-api-field-notes.md` - all values
-strings or null, the same nesting, one WindSolar row with null actuals - but
-the numbers are obviously fake and every timestamp is January 1, 1970.
+They mimic the structure of the real responses - all values strings or null,
+the same nesting, one WindSolar row with null actuals - but the numbers are
+obviously fake and every timestamp is January 1, 1970.
 
 Minimal means minimal: two fuel categories instead of eight, two or three
 load readings instead of 24 and 252, two Snapshot rows instead of four, two
@@ -28,16 +28,21 @@ captured data.
 
 From the repo root:
 
-    python -m tests.stub.server --port 8971
-    python -m tests.stub.server --port 8971 --mode html
-    python -m tests.stub.server --port 0 --mode fail-one \
+    .venv/bin/python -m tests.stub.server --port 8971
+    .venv/bin/python -m tests.stub.server --port 8971 --mode html
+    .venv/bin/python -m tests.stub.server --port 0 --mode fail-one \
         --fail-endpoint WindSolar
+
+`.venv/bin/python` rather than `python`, because macOS ships `python3` only
+and a bare `python` exists just inside an activated virtualenv.
 
 `--port 0` asks the OS for a free port. The chosen port is printed on
 startup either way. Point the poller at it with
 `MISO_API_BASE=http://127.0.0.1:8971`, and send its output somewhere
-harmless with `MISO_RAW_DIR`. A non-default base bypasses the rate guard, so
-no 60-second wait applies.
+harmless with `MISO_RAW_DIR`. A loopback base - `localhost` or a loopback IP
+- bypasses the rate guard, so no 60-second wait applies. Any other host
+stays guarded, so a stub reached by machine name or LAN address waits out
+the 60 seconds like the real feed.
 
 From a test, run it on a thread instead:
 
@@ -94,7 +99,7 @@ fixture bytes unmodified in `ok` mode.
 
 ## Which criteria use it
 
-Ten of the eighteen acceptance criteria in section 9 of the specification:
+Ten of the eighteen acceptance criteria:
 
 | Criterion | Mode |
 |---|---|
@@ -109,5 +114,5 @@ Ten of the eighteen acceptance criteria in section 9 of the specification:
 | 15, `--status` | any - it makes no request |
 | 17, hygiene | any |
 
-Criteria 1 to 4, 11 and 12 run against live MISO and the real rate guard, so
-the stub takes no part in them.
+The other eight - 1 to 4, 11, 12, 16 and 18 - do not use the stub. Of those,
+1 to 4, 11 and 12 run against live MISO and the real rate guard.
