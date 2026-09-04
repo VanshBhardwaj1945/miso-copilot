@@ -32,7 +32,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -114,9 +114,36 @@ ENDPOINTS = [
 
 # --- configuration ----------------------------------------------------------
 
+def safe_base(base: str) -> str:
+    """`base` with any userinfo removed, for logging and for the status file.
+
+    A base of the form http://user:pw@host would otherwise reach a WARNING
+    line every cycle, the `base_url` field in _status.json, and the --status
+    screen. None of those should ever carry a password.
+    """
+    parts = urlsplit(base)
+    if not parts.hostname:
+        return base
+    netloc = parts.hostname
+    if parts.port:
+        netloc = f"{netloc}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", "")).rstrip("/")
+
+
 def base_url() -> str:
-    """MISO's base URL, or a stub. Trailing slashes stripped so paths join cleanly."""
-    return (os.environ.get("MISO_API_BASE") or DEFAULT_BASE_URL).rstrip("/")
+    """MISO's base URL, or a stub, normalized so it can be joined and compared.
+
+    Query and fragment are dropped, not just trailing slashes. requests
+    strips a fragment before sending, so a base carrying one would hand the
+    guard four distinct keys while putting four identical requests on the
+    wire - the guard satisfied, one link hit four times a cycle. The key we
+    claim and the URL we send have to be the same string.
+    """
+    raw = (os.environ.get("MISO_API_BASE") or DEFAULT_BASE_URL).strip()
+    parts = urlsplit(raw)
+    if parts.scheme and parts.netloc:
+        raw = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    return raw.rstrip("/")
 
 
 def raw_dir() -> Path:
@@ -129,8 +156,8 @@ def raw_dir() -> Path:
     """
     override = os.environ.get("MISO_RAW_DIR")
     if override:
-        # Resolved, because `raw_dir` in the status
-        # file as the absolute directory actually written. A relative override
+        # Resolved, because the status file records `raw_dir` as the
+        # absolute directory actually written. A relative override
         # recorded verbatim as "relraw" identifies nothing, which defeats the
         # only reason the field exists. The default below is already absolute.
         return Path(override).expanduser().resolve()
@@ -326,7 +353,7 @@ def _entry_is_usable(entry) -> bool:
     failures = entry.get("consecutive_failures")
     # bool before int: True is an instance of int, so a hand-edited
     # "consecutive_failures": true passed this gate and counted up from 1.
-    # Specification 6.1 asks for a non-negative integer, and true is not one.
+    # A non-negative integer is required, and true is not one.
     if isinstance(failures, bool) or not isinstance(failures, int):
         return False
     if failures < 0:
@@ -557,7 +584,7 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
                     current: dict) -> None:
     """Delete the payload file of any endpoint that has left the table.
 
-    Specification 6.1: a pruned status entry whose .json is still sitting
+    A pruned status entry whose .json is still sitting
     beside it leaves the RAG lane a file that parses, passes a shape check,
     looks live, and has no provenance anywhere.
 
@@ -570,8 +597,14 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
     # entry keyed "_STATUS" named a different Path, compared unequal, and
     # unlinked the real status file.
     status_key = status_path(directory).stem.casefold()
+    # Casefolded, because macOS and Windows filesystems are
+    # case-insensitive: a stale entry keyed "Windsolar" names the same
+    # file on disk as the live "WindSolar", so a case-sensitive test
+    # would delete the payload this very cycle just wrote and leave the
+    # status file swearing it succeeded.
+    live = {k.casefold() for k in current}
     for key in previous_endpoints:
-        if key in current:
+        if isinstance(key, str) and key.casefold() in live:
             continue
         if not isinstance(key, str) or not SAFE_KEY.fullmatch(key):
             log.warning("pruned an unrecognized endpoint key %r, "
@@ -598,7 +631,7 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
 def _log_configuration(base: str, bypass_guard: bool, directory: Path) -> None:
     """Announce a non-default base and raw directory, once per cycle.
 
-    Specification 8.6 wants a non-default base to be loud every cycle.
+    A non-default base has to be loud every cycle.
     Whether the guard is on is a separate sentence, because a non-default
     base that is not loopback still reaches MISO and is still guarded, and an
     operator skimming the log must be able to tell the two apart at a glance.
@@ -606,10 +639,10 @@ def _log_configuration(base: str, bypass_guard: bool, directory: Path) -> None:
     if base != DEFAULT_BASE_URL:
         if bypass_guard:
             log.warning("MISO_API_BASE is %s - loopback, RATE GUARD BYPASSED",
-                        base)
+                        safe_base(base))
         else:
             log.warning("MISO_API_BASE is %s - not loopback, rate guard ACTIVE",
-                        base)
+                        safe_base(base))
     if os.environ.get("MISO_RAW_DIR"):
         log.warning("MISO_RAW_DIR is set, writing to %s", directory)
 
@@ -655,7 +688,7 @@ def _write_status(directory: Path, observations: dict, base: str,
         _prune_payloads(directory, previous_endpoints, results)
 
         status = {
-            "base_url": base,
+            "base_url": safe_base(base),
             "raw_dir": str(directory),
             "cycle_started_at": started.isoformat(),
             "cycle_finished_at": now().isoformat(),
@@ -697,7 +730,7 @@ def poll_once() -> dict:
             observations[key] = _poll_endpoint(
                 endpoint, base + endpoint.path, directory, bypass_guard)
         except Exception:
-            # Specification section 7: any exception in one endpoint is
+            # Any exception in one endpoint is
             # recorded and the other three still run. _fetch names the
             # failures it can foresee, so anything arriving here is a bug in
             # our code and is reported as one.

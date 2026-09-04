@@ -44,8 +44,7 @@ class GuardUnreadableError(Exception):
     """The lease file exists but its contents cannot be trusted.
 
     Distinct from a missing file, which simply means first run. This one is
-    fatal to the cycle: a guard that cannot read its
-    own state fails closed.
+    fatal to the cycle: a guard that cannot read its own state fails closed.
     """
 
 

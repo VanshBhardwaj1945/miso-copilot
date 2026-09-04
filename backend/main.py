@@ -44,13 +44,18 @@ async def lifespan(app: FastAPI):
     """
     try:
         from backend.poller import schedule
-    except ImportError:
+    except ImportError as e:
         # apscheduler is optional. The API is the demo; the poller is a
         # background convenience, and a missing dependency must not stop
         # /ask and /health from serving. python -m backend.poller still
         # works, so the poller can be run beside the API instead.
-        log.warning("no poll job registered - apscheduler is not installed. "
-                    "Install it with: pip install apscheduler")
+        #
+        # Name the module that actually failed. This except covers the whole
+        # import chain, so blaming apscheduler for a missing requests costs
+        # somebody twenty minutes chasing the wrong package.
+        missing = e.name or "a dependency"
+        log.warning("no poll job registered - %s is not installed. "
+                    "Install it with: pip install %s", missing, missing)
         yield
         return
 
