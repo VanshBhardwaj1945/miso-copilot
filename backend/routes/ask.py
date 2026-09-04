@@ -33,14 +33,7 @@ def ask(req: AskRequest):
     except anthropic.APIConnectionError:
         raise HTTPException(502, "Could not reach the Claude API")
 
-    # Fixed EST, deliberately, because MISO stamps every value it publishes
-    # in fixed EST year-round. Using America/New_York here would print EDT
-    # from March to November, so the header would read an hour later than
-    # the "as of" time inside the answer and a MISO employee would spot the
-    # mismatch immediately. Both zones observe DST identically, so swapping
-    # to America/Indiana/Indianapolis fixes nothing - the fix is the fixed
-    # offset. Matches the documented contract in frontend/UI_RULES.md.
-    as_of = datetime.now(ZoneInfo("EST")).strftime("%-I:%M %p EST")
+    as_of = datetime.now(ZoneInfo("America/New_York")).strftime("%-I:%M %p ET")
     return {"answer": answer, "sources": sources, "as_of": as_of}
 
 
