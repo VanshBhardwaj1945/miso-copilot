@@ -166,10 +166,23 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - If you change the architecture picture, update both `docs/architecture.excalidraw`
   (source) and `docs/arch-v1.png` (render), plus the mermaid diagram in `README.md`.
 - Update `README.md` when planned pieces (backend/, ingest/) become real.
+- Tests live in `tests/`, named for the behavior they protect rather than the
+  function they call. Where a test exists because of a bug that actually
+  happened, say so in a line above it - that is what stops someone deleting it
+  as redundant later.
+- `pytest` and `pytest-cov` stay out of `requirements.txt`. They are developer
+  tools; nothing the product imports needs them.
 
 ## Definition of done for a change
 
 1. App still boots (`streamlit run app.py`).
-2. No secrets, no `data/` artifacts, no `__pycache__` in the commit.
-3. README/docs updated if behavior or layout changed.
-4. Any new answer path includes a source URL and an "as of <time>" stamp.
+2. `pytest` passes, if you touched `backend/poller/`. A bare `pytest` is the
+   whole command; it also enforces the coverage floor, so new code without
+   tests fails the run rather than quietly lowering the number.
+3. No secrets, no `data/` artifacts, no `__pycache__` in the commit.
+4. README/docs updated if behavior or layout changed. This one has bitten the
+   project twice: a README that still described a rate-guard rule the code had
+   removed, and this file claiming there was no test suite after one landed. A
+   document that contradicts the code is worse than no document, because it is
+   believed.
+5. Any new answer path includes a source URL and an "as of <time>" stamp.
