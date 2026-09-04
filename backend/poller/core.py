@@ -28,6 +28,7 @@ import os
 import re
 import tempfile
 import time
+import zlib
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import requests
+import urllib3
 
 from backend.poller import guard
 
@@ -44,9 +46,29 @@ log = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://public-api.misoenergy.org"
 TIMEZONE = ZoneInfo("America/Indiana/Indianapolis")
 TIMEOUT = (5, 15)
+# requests' read timeout is per socket read, not a total. A server that sends
+# one byte every few seconds keeps every individual read comfortably inside
+# TIMEOUT[1] and the request never returns - measured, it was still running
+# after 90 seconds. With max_instances=1 on the scheduler one such reply stops
+# polling permanently and silently, so the body read carries its own deadline.
+MAX_REQUEST_SECONDS = 20
+# response.content buffers the whole body with no cap. A 256 MB reply cost
+# 582 MB of resident memory when measured, against a 28 MB baseline, and the
+# poller shares a process with the API serving /ask. The largest real payload
+# is about 12 KB, so this is roughly 2700x headroom and still bounded.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+BODY_CHUNK_BYTES = 64 * 1024
 HEADERS = {
     "User-Agent": "miso-copilot/0.1 (MISO Xtern Challenge 2026)",
     "Accept": "application/json",
+    # Spelled out rather than left to requests, because the body is read with
+    # raw.read1 - the one primitive that returns what has arrived instead of
+    # blocking until a full chunk exists - and read1 hands back bytes exactly
+    # as they came off the socket, undecoded. This lane therefore decodes
+    # them itself, and may only ask for encodings it can decode. MISO does
+    # serve these gzipped (spec 5.1), so refusing compression outright would
+    # mean refusing MISO.
+    "Accept-Encoding": "gzip, deflate",
 }
 STALE_TMP_SECONDS = 600
 DEFAULT_POLL_SECONDS = 300
@@ -429,6 +451,137 @@ def _validate(endpoint: Endpoint, content: bytes, status: int,
             "ref_id": ref_id, "content": content}
 
 
+# requests wraps urllib3's exceptions, but only on the paths that go through
+# requests. _read_body calls response.raw.read1 directly - the one primitive
+# that makes a deadline enforceable - and urllib3's own exceptions come back
+# out of it unwrapped. Both families have to be named here or a plain read
+# timeout arrives as "internal error" with a traceback, which is a lie about
+# whose fault it is.
+TRANSPORT_ERRORS = (requests.exceptions.RequestException,
+                    urllib3.exceptions.HTTPError,
+                    OSError)
+
+
+def _transport_error(e: Exception, endpoint: Endpoint) -> str:
+    """The closed-vocabulary name for a transport exception.
+
+    Order is load-bearing twice over. requests' ConnectTimeout subclasses
+    ConnectionError before Timeout, so a connect timeout reads as a
+    connection error unless Timeout is tested first. urllib3's IncompleteRead
+    subclasses HTTPError before http.client.IncompleteRead, so a truncated
+    body needs naming before the generic case.
+    """
+    if isinstance(e, (requests.exceptions.MissingSchema,
+                      requests.exceptions.InvalidURL)):
+        return "bad base url"
+    if isinstance(e, (requests.exceptions.Timeout,
+                      urllib3.exceptions.TimeoutError)):
+        return "timeout"
+    if isinstance(e, (requests.exceptions.ChunkedEncodingError,
+                      requests.exceptions.ContentDecodingError,
+                      urllib3.exceptions.ProtocolError,
+                      urllib3.exceptions.DecodeError,
+                      urllib3.exceptions.IncompleteRead,
+                      urllib3.exceptions.InvalidChunkLength)):
+        return "truncated response"
+    if isinstance(e, (requests.exceptions.ConnectionError,
+                      ConnectionError)):
+        return "connection error"
+    log.warning("unexpected request failure for %s", endpoint.key,
+                exc_info=True)
+    return "internal error"
+
+
+def _decoder_for(response):
+    """A decompressor for this reply, None if it is plain, or "unsupported".
+
+    zlib handles both encodings requests is allowed to ask for above: gzip
+    needs the 16 + MAX_WBITS window that tells zlib to expect a gzip header,
+    deflate is the bare stream.
+    """
+    encoding = (response.headers.get("Content-Encoding") or "").strip().lower()
+    if encoding in ("", "identity"):
+        return None
+    if encoding == "gzip":
+        return zlib.decompressobj(16 + zlib.MAX_WBITS)
+    if encoding == "deflate":
+        return zlib.decompressobj()
+    return "unsupported"
+
+
+def _read_body(response, deadline: float) -> tuple[bytes, str | None]:
+    """The body, or (b"", reason) if it is too large, too slow, or unreadable.
+
+    Read with raw.read1 rather than iter_content or response.content, and the
+    choice is the whole point of this function.
+
+    response.content buffers the entire reply with no cap: a 256 MB reply cost
+    582 MB of resident memory when measured, and this process also serves
+    /ask. iter_content caps memory but not time - it blocks until it has a
+    full chunk, so a server dripping one byte at a time never yields control
+    and the deadline below would never be tested. read1 is the one primitive
+    that returns whatever has arrived, which is what makes a deadline
+    enforceable at all.
+
+    Both the compressed and the decompressed size are capped, because they
+    are two different ways to be hurt. Capping only what arrives would let a
+    few compressed KB expand into gigabytes; capping only the result would
+    let a slow enormous reply occupy the socket regardless.
+    """
+    decoder = _decoder_for(response)
+    if decoder == "unsupported":
+        log.warning("%s: cannot decode Content-Encoding %r",
+                    response.url, response.headers.get("Content-Encoding"))
+        return b"", "unexpected encoding"
+
+    chunks, received, produced = [], 0, 0
+    while True:
+        chunk = response.raw.read1(BODY_CHUNK_BYTES)
+        if not chunk:
+            break
+        received += len(chunk)
+        if received > MAX_RESPONSE_BYTES:
+            log.warning("%s: reply passed %d bytes, refusing it",
+                        response.url, MAX_RESPONSE_BYTES)
+            return b"", "response too large"
+        if time.monotonic() > deadline:
+            log.warning("%s: reply still arriving after %ds, giving up",
+                        response.url, MAX_REQUEST_SECONDS)
+            return b"", "timeout"
+        if decoder is not None:
+            try:
+                # max_length is what stops a compression bomb: zlib returns
+                # at most that many bytes and keeps the rest, so the check
+                # below sees the overflow without anything having allocated
+                # the full expansion first.
+                chunk = decoder.decompress(
+                    chunk, MAX_RESPONSE_BYTES - produced + 1)
+            except zlib.error:
+                log.warning("%s: compressed body did not decode",
+                            response.url)
+                return b"", "truncated response"
+        produced += len(chunk)
+        if produced > MAX_RESPONSE_BYTES:
+            log.warning("%s: body reached %d bytes, refusing it",
+                        response.url, MAX_RESPONSE_BYTES)
+            return b"", "response too large"
+        chunks.append(chunk)
+
+    if decoder is not None:
+        try:
+            chunks.append(decoder.flush())
+        except zlib.error:
+            return b"", "truncated response"
+        if not decoder.eof:
+            # The compressed stream ended before its own end marker. zlib
+            # does not raise for this - it just returns what it managed -
+            # so without the check a half payload would go on to fail the
+            # JSON gate and be reported as MISO sending bad JSON.
+            log.warning("%s: compressed body ended early", response.url)
+            return b"", "truncated response"
+    return b"".join(chunks), None
+
+
 def _fetch(endpoint: Endpoint, url: str) -> dict:
     """One request. Returns a result dict; never raises for a MISO-side problem.
 
@@ -441,33 +594,35 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
     ref_id, content - with None where a value does not apply, so the caller
     subscripts rather than guesses which ones are present.
     """
+    deadline = time.monotonic() + MAX_REQUEST_SECONDS
     try:
         response = requests.get(url, timeout=TIMEOUT, headers=HEADERS,
-                                allow_redirects=False)
-    except (requests.exceptions.MissingSchema,
-            requests.exceptions.InvalidURL):
-        return _fetch_failure("bad base url")
-    except requests.exceptions.Timeout:
-        return _fetch_failure("timeout")
-    except (requests.exceptions.ChunkedEncodingError,
-            requests.exceptions.ContentDecodingError):
-        return _fetch_failure("truncated response")
-    except requests.exceptions.ConnectionError:
-        return _fetch_failure("connection error")
-    except requests.exceptions.RequestException:
-        log.warning("unexpected request failure for %s", endpoint.key,
-                    exc_info=True)
-        return _fetch_failure("internal error")
+                                allow_redirects=False, stream=True)
+    except TRANSPORT_ERRORS as e:
+        return _fetch_failure(_transport_error(e, endpoint))
 
-    size = len(response.content)
-    status = response.status_code
+    # The body is read inside its own try: with stream=True the transport can
+    # still fail here, long after the headers arrived, and those failures
+    # belong in the same closed vocabulary as the ones above.
+    try:
+        with response:
+            status = response.status_code
+            content, refused = _read_body(response, deadline)
+    except TRANSPORT_ERRORS as e:
+        return _fetch_failure(_transport_error(e, endpoint))
 
+    if refused is not None:
+        # No size: nothing was kept, and a partial count would read as though
+        # that many bytes had been accepted.
+        return _fetch_failure(refused, status)
+
+    size = len(content)
     if 300 <= status < 400:
         return _fetch_failure(f"redirect {status}", status, size)
     if status != 200:
         return _fetch_failure(f"HTTP {status}", status, size)
 
-    return _validate(endpoint, response.content, status, size)
+    return _validate(endpoint, content, status, size)
 
 
 # --- one endpoint, end to end -----------------------------------------------

@@ -17,11 +17,14 @@ import os
 import tempfile
 import threading
 import time
+import gzip
+import zlib
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 import requests
+import urllib3
 
 from backend.poller import core
 from tests.support import GOOD_BODIES, GOOD_REF_IDS, FakeResponse
@@ -1072,6 +1075,214 @@ def test_fetch_does_not_follow_redirects(fake_get):
 def test_fetch_sends_the_projects_user_agent(fake_get):
     fetch(fake_get, FakeResponse(GOOD_BODIES["/api/FuelMix"], 200))
     assert "miso-copilot" in fake_get.calls[0][1]["headers"]["User-Agent"]
+
+
+# --- the body: bounded in size, in time, and in encoding ---------------------
+#
+# Every test below exists because a stress run found the unbounded version.
+# core reads the body with raw.read1 rather than response.content precisely
+# so that these three limits can exist at all.
+
+def test_max_response_bytes_is_thirty_two_mebibytes():
+    # A literal. The largest real payload is about 12 KB, so this is a wide
+    # margin that is still a margin. Measured before the cap existed: a
+    # 256 MB reply cost 582 MB of resident memory in a process that also
+    # serves /ask.
+    assert core.MAX_RESPONSE_BYTES == 32 * 1024 * 1024
+
+
+def test_max_request_seconds_is_twenty():
+    # A literal, for the same reason. requests' read timeout is per socket
+    # read, so without this a reply that keeps dripping never ends.
+    assert core.MAX_REQUEST_SECONDS == 20
+
+
+def test_a_reply_over_the_size_cap_is_refused(fake_get):
+    oversized = b"x" * (core.MAX_RESPONSE_BYTES + 1)
+    observed = fetch(fake_get, FakeResponse(oversized, 200, pieces=64))
+    assert observed["ok"] is False
+    assert observed["error"] == "response too large"
+
+
+def test_a_reply_at_the_size_cap_is_still_read(fake_get):
+    # The comparison is `>`, so exactly the cap is allowed through. It fails
+    # the JSON gate rather than the size gate, which is the point: the size
+    # check is what we are pinning, not the parser.
+    at_cap = b"x" * core.MAX_RESPONSE_BYTES
+    observed = fetch(fake_get, FakeResponse(at_cap, 200, pieces=64))
+    assert observed["error"] == "invalid JSON"
+
+
+def test_a_refused_reply_reports_no_byte_count(fake_get):
+    # bytes stays None: nothing was kept, and a partial count would read as
+    # though that many bytes had been accepted and stored.
+    observed = fetch(fake_get,
+                     FakeResponse(b"x" * (core.MAX_RESPONSE_BYTES + 1), 200,
+                                  pieces=8))
+    assert observed["bytes"] is None
+
+
+def test_a_reply_that_arrives_too_slowly_is_a_timeout(fake_get, monkeypatch):
+    # The deadline is wall clock, so the clock is moved rather than waited on.
+    ticks = iter([0.0] + [core.MAX_REQUEST_SECONDS + 1] * 50)
+    monkeypatch.setattr(core.time, "monotonic", lambda: next(ticks))
+    observed = fetch(fake_get,
+                     FakeResponse(GOOD_BODIES["/api/FuelMix"], 200, pieces=4))
+    assert observed["ok"] is False
+    assert observed["error"] == "timeout"
+
+
+def test_a_prompt_reply_is_not_cut_off_by_the_deadline(fake_get):
+    observed = fetch(fake_get,
+                     FakeResponse(GOOD_BODIES["/api/FuelMix"], 200, pieces=8))
+    assert observed["ok"] is True
+    assert observed["ref_id"] == "ref-fuelmix"
+
+
+def test_the_request_asks_only_for_encodings_this_lane_can_decode(fake_get):
+    # read1 hands back undecoded bytes, so this lane decodes them itself and
+    # may only ask for what _decoder_for handles. Asking for br here would
+    # invite a reply nothing can read.
+    fetch(fake_get, FakeResponse(GOOD_BODIES["/api/FuelMix"], 200))
+    assert fake_get.calls[0][1]["headers"]["Accept-Encoding"] == "gzip, deflate"
+
+
+@pytest.mark.parametrize("encoding,pack", [
+    ("gzip", lambda b: gzip.compress(b)),
+    ("GZIP", lambda b: gzip.compress(b)),
+    ("deflate", lambda b: zlib.compress(b)),
+])
+def test_a_compressed_reply_is_decoded(fake_get, encoding, pack):
+    # MISO serves these gzipped (spec 5.1), so this is the normal path in
+    # production, not an edge case.
+    observed = fetch(fake_get, FakeResponse(
+        pack(GOOD_BODIES["/api/FuelMix"]), 200,
+        headers={"Content-Encoding": encoding}))
+    assert observed["ok"] is True
+    assert observed["ref_id"] == "ref-fuelmix"
+
+
+def test_a_compressed_reply_is_decoded_across_several_reads(fake_get):
+    # read1 returns what has arrived, so the decoder is fed in pieces and
+    # has to carry state between them.
+    body = gzip.compress(GOOD_BODIES["/api/RealTimeTotalLoad"])
+    observed = fetch(fake_get, FakeResponse(
+        body, 200, headers={"Content-Encoding": "gzip"}, pieces=7),
+        key="RealTimeTotalLoad")
+    assert observed["ok"] is True
+    assert observed["ref_id"] == "ref-load"
+
+
+def test_the_payload_written_is_the_decoded_bytes(raw, fake_get, monkeypatch):
+    # What lands in data/raw must be what curl would show, not gzip.
+    monkeypatch.setenv("MISO_API_BASE", LOOPBACK_BASE)
+    for path, body in GOOD_BODIES.items():
+        fake_get.set(path, FakeResponse(gzip.compress(body), 200,
+                                        headers={"Content-Encoding": "gzip"}))
+    core.poll_once()
+    assert (raw / "FuelMix.json").read_bytes() == GOOD_BODIES["/api/FuelMix"]
+
+
+@pytest.mark.parametrize("encoding", ["br", "zstd", "compress", "weird"])
+def test_an_encoding_this_lane_cannot_decode_is_named(fake_get, encoding):
+    # Named rather than left to the parser: the bytes would be perfectly
+    # valid something, and "invalid JSON" would send someone hunting a
+    # parser bug that does not exist.
+    observed = fetch(fake_get, FakeResponse(
+        GOOD_BODIES["/api/FuelMix"], 200,
+        headers={"Content-Encoding": encoding}))
+    assert observed["error"] == "unexpected encoding"
+
+
+def test_a_corrupt_gzip_body_is_a_truncated_response(fake_get):
+    observed = fetch(fake_get, FakeResponse(
+        b"\x1f\x8b\x08\x00 not actually gzip at all", 200,
+        headers={"Content-Encoding": "gzip"}))
+    assert observed["error"] == "truncated response"
+
+
+def test_a_corrupted_compressed_body_is_a_truncated_response(fake_get):
+    # A valid gzip header followed by garbage. zlib raises part way through,
+    # which is a different path from the stream simply stopping early.
+    good = gzip.compress(GOOD_BODIES["/api/FuelMix"])
+    corrupt = good[:6] + bytes(b ^ 0xFF for b in good[6:])
+    observed = fetch(fake_get, FakeResponse(
+        corrupt, 200, headers={"Content-Encoding": "gzip"}))
+    assert observed["error"] == "truncated response"
+
+
+def test_a_decoder_that_fails_at_the_flush_is_a_truncated_response(
+        fake_get, monkeypatch):
+    # zlib can also fail when the final block is assembled rather than while
+    # chunks are fed in. Same verdict, different moment.
+    class FailingFlush:
+        eof = True
+
+        def decompress(self, data, max_length=None):
+            return data
+
+        def flush(self):
+            raise zlib.error("incomplete final block")
+
+    monkeypatch.setattr(core, "_decoder_for", lambda response: FailingFlush())
+    observed = fetch(fake_get, FakeResponse(
+        GOOD_BODIES["/api/FuelMix"], 200,
+        headers={"Content-Encoding": "gzip"}))
+    assert observed["error"] == "truncated response"
+
+
+def test_a_compression_bomb_is_refused_before_it_is_allocated(fake_get):
+    # A few hundred KB of zeros that expands past the cap. The decoder is
+    # given an explicit max_length, so this never allocates the full size.
+    bomb = gzip.compress(b"\0" * (core.MAX_RESPONSE_BYTES + 1024))
+    assert len(bomb) < core.MAX_RESPONSE_BYTES      # arrives well under the cap
+    observed = fetch(fake_get, FakeResponse(
+        bomb, 200, headers={"Content-Encoding": "gzip"}, pieces=4))
+    assert observed["error"] == "response too large"
+
+
+@pytest.mark.parametrize("header", ["identity", "IDENTITY", "", None])
+def test_an_uncompressed_reply_is_read_normally(fake_get, header):
+    headers = {} if header is None else {"Content-Encoding": header}
+    observed = fetch(fake_get, FakeResponse(GOOD_BODIES["/api/FuelMix"], 200,
+                                            headers=headers))
+    assert observed["ok"] is True
+
+
+def test_the_response_is_closed_even_on_a_refusal(fake_get):
+    # stream=True holds the connection until it is released. A refused reply
+    # is the path most likely to leak one.
+    response = FakeResponse(b"x" * (core.MAX_RESPONSE_BYTES + 1), 200,
+                            pieces=8)
+    fetch(fake_get, response)
+    assert response.closed is True
+
+
+@pytest.mark.parametrize("exception,expected", [
+    (urllib3.exceptions.ReadTimeoutError(None, "u", "read timed out"),
+     "timeout"),
+    (urllib3.exceptions.ProtocolError("connection broken"),
+     "truncated response"),
+    (urllib3.exceptions.DecodeError("bad encoding"), "truncated response"),
+    (urllib3.exceptions.IncompleteRead(0, 10), "truncated response"),
+    (urllib3.exceptions.SSLError("handshake failed"), "internal error"),
+])
+def test_a_urllib3_failure_during_the_body_read_keeps_the_vocabulary(
+        fake_get, exception, expected):
+    # requests wraps urllib3's exceptions on the paths that go through
+    # requests. read1 is not one of them, so these arrive unwrapped, and
+    # without naming them a plain read timeout is reported as an internal
+    # error - which blames us for MISO being slow.
+    class Exploding(FakeResponse):
+        def __init__(self):
+            super().__init__(b"", 200)
+            self.raw = self
+
+        def read1(self, n=None):
+            raise exception
+
+    observed = fetch(fake_get, Exploding())
+    assert observed["error"] == expected
 
 
 def test_fetch_bounds_both_the_connect_and_the_read(fake_get):
