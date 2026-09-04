@@ -33,7 +33,8 @@ def make_status(outcomes, **extra):
     writes: consecutive_failures 0, last_success None, and so on.
     """
     endpoints = {}
-    for endpoint, outcome in zip(core.ENDPOINTS, outcomes):
+    for endpoint, outcome in zip(core.ENDPOINTS, outcomes,
+                                  strict=True):
         entry = dict(core.INITIAL_ENTRY)
         entry["path"] = endpoint.path
         entry["outcome"] = outcome
@@ -135,12 +136,14 @@ def test_successful_cycle_logs_how_many_of_how_many(monkeypatch, caplog):
 
 # --- the ordering of the skipped check, spec 8.4 ----------------------------
 
-def test_first_ever_run_skipped_everywhere_exits_2_not_0():
-    # The bug this exists for: on a first-ever run with no stored status,
-    # core synthesizes one INITIAL_ENTRY per endpoint, each carrying
-    # consecutive_failures == 0. A success count computed before the
-    # skipped check reads those four zeroes as four successes and exits 0,
-    # reporting a healthy poll of a cycle that fetched nothing at all.
+def test_a_first_ever_all_skipped_status_counts_zero_successes():
+    # Half of the bug this exists for: on a first-ever run with no stored
+    # status, core synthesizes one INITIAL_ENTRY per endpoint, each carrying
+    # consecutive_failures == 0. A success count computed before the skipped
+    # check reads those four zeroes as four successes and exits 0, reporting
+    # a healthy poll of a cycle that fetched nothing at all. This pins the
+    # count; the exit code it feeds is pinned by the test below, which is
+    # the one that actually runs the command.
     status = {
         "endpoints": {
             endpoint.key: dict(core.INITIAL_ENTRY, path=endpoint.path,
@@ -292,6 +295,14 @@ def test_age_text_reports_a_past_timestamp_as_an_age():
     assert cli.age_text(stamp, now) == "3m ago"
 
 
+def test_age_text_reports_the_present_moment_as_an_age():
+    # The comparison is `seconds < 0`, not `<= 0`: a stamp equal to the
+    # reference is now, not the future. --status stamps its own reference,
+    # so an endpoint written microseconds earlier lands here.
+    now = core.now()
+    assert cli.age_text(now.isoformat(), now) == "0s ago"
+
+
 def test_age_text_reports_a_future_timestamp_plainly():
     now = core.now()
     stamp = (now + timedelta(hours=1)).isoformat()
@@ -323,6 +334,37 @@ def test_feed_text_reports_a_stalled_ref_id_as_frozen():
     }
     text = cli.feed_text(entry, endpoint_named("FuelMix"), now)
     assert text.startswith("FROZEN - ref_id changed 2h 0m ago")
+
+
+def test_frozen_after_seconds_is_three_missed_publications():
+    # A literal, because the two tests around this one use a 2 hour gap and
+    # a 2 minute gap and so pass for almost any threshold. MISO publishes on
+    # a 5 minute grid, so 900 seconds is three missed publications - low
+    # enough to notice a genuinely stalled feed during the demo, high enough
+    # that one late publication is not called a fault.
+    assert cli.FROZEN_AFTER_SECONDS == 900
+
+
+def test_a_feed_exactly_at_the_frozen_threshold_is_still_moving():
+    # The comparison is `>`, so 900 seconds exactly is not yet frozen.
+    # Neither boundary is reachable by the 2 hour / 2 minute tests.
+    now = core.now()
+    entry = {
+        "ref_id_changed_at": (now - timedelta(seconds=900)).isoformat(),
+        "last_success": now.isoformat(),
+    }
+    text = cli.feed_text(entry, endpoint_named("FuelMix"), now)
+    assert text.startswith("moving")
+
+
+def test_a_feed_one_second_past_the_frozen_threshold_is_frozen():
+    now = core.now()
+    entry = {
+        "ref_id_changed_at": (now - timedelta(seconds=901)).isoformat(),
+        "last_success": now.isoformat(),
+    }
+    text = cli.feed_text(entry, endpoint_named("FuelMix"), now)
+    assert text.startswith("FROZEN")
 
 
 def test_feed_text_reports_a_current_ref_id_as_moving():

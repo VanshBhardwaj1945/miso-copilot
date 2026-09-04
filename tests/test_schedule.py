@@ -41,6 +41,32 @@ def no_real_cycles(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def no_leaked_cycles():
+    """Fail any test here that leaves a poll cycle running behind it.
+
+    stop_scheduler calls shutdown(wait=False) by design - DaemonThreadExecutor
+    exists so a stuck cycle cannot hold up Ctrl-C - so shutdown returns while a
+    cycle may still be in flight. A cycle that outlives its test outlives
+    monkeypatch with it, and then resolves the real core.poll_once, against the
+    real https://public-api.misoenergy.org, writing the repo's own data/raw.
+    That was measured, not theorized.
+
+    Autouse and asserting rather than merely joining, for the same reason
+    conftest's cache_dir is autouse: an isolation rule that depends on every
+    future test author remembering it is not a rule. conftest.py also refuses
+    non-loopback requests at the socket, so the request cannot land even if
+    this fixture is somehow bypassed.
+    """
+    yield
+    for thread in threading.enumerate():
+        if thread.name == "miso-poll":
+            thread.join(timeout=10)
+            assert not thread.is_alive(), (
+                "a poll cycle outlived its test - it can now reach the real "
+                "MISO, because monkeypatch has already been unwound")
+
+
 @pytest.fixture
 def stopper():
     """Guarantees every scheduler a test starts is shut down again."""
@@ -378,6 +404,32 @@ def test_the_executor_hands_back_an_error_from_the_job_runner(monkeypatch):
     executor._do_submit_job(FakeJob(), [core.now()])
     assert done.wait(timeout=5)
     assert isinstance(errors[0], RuntimeError)
+
+
+def test_the_executor_runs_the_job_on_a_daemon_thread(monkeypatch):
+    # Whether the interpreter actually abandons the thread at exit needs a
+    # subprocess and a real signal, and stays out of scope per the module
+    # docstring. The flag itself is the reason this executor exists at all,
+    # and it is assertable here: APScheduler's default pool joins its
+    # workers on the way out no matter what their daemon flag says, so a
+    # cycle stuck on a slow MISO would hold the terminal for up to 80
+    # seconds - exactly when someone is reaching for Ctrl-C.
+    made = []
+    real_thread = threading.Thread
+
+    def record(**kwargs):
+        made.append(kwargs)
+        return real_thread(**kwargs)
+
+    monkeypatch.setattr(schedule.threading, "Thread", record)
+    monkeypatch.setattr(schedule, "run_job", lambda *a, **k: [])
+    executor = schedule.DaemonThreadExecutor()
+    executor._logger = logging.getLogger("test.executor")
+    monkeypatch.setattr(executor, "_run_job_success", lambda *a: None)
+
+    executor._do_submit_job(FakeJob(), [core.now()])
+    assert made[0]["daemon"] is True
+    assert made[0]["name"] == "miso-poll"
 
 
 def test_the_executor_hands_back_a_successful_run(monkeypatch):

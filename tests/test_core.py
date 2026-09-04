@@ -17,14 +17,14 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import requests
 
 from backend.poller import core
-from tests.conftest import GOOD_BODIES, GOOD_REF_IDS, FakeResponse
+from tests.support import GOOD_BODIES, GOOD_REF_IDS, FakeResponse
 
 # A documentation range address. Not loopback, so the rate guard stays on,
 # and not routable, so a request that escapes a patched requests.get dies
@@ -395,14 +395,6 @@ def test_write_atomic_survives_its_tmp_vanishing_before_the_cleanup(
         tmp_path, monkeypatch):
     # suppress rather than check-then-act: a temp file that disappears in
     # the finally block must not mask the exception that sent us there.
-    real_mkstemp = tempfile.mkstemp
-
-    def vanishing(**kwargs):
-        fd, name = real_mkstemp(**kwargs)
-        return fd, name
-
-    monkeypatch.setattr(core.tempfile, "mkstemp", vanishing)
-
     def replace_then_remove(src, dst):
         os.unlink(src)
         raise OSError("replace failed after the temp file went away")
@@ -454,12 +446,59 @@ def age(path: Path, seconds: int) -> None:
     os.utime(path, (old, old))
 
 
+def test_stale_tmp_seconds_is_ten_minutes():
+    # A literal, because every other test in this section backdates by
+    # core.STALE_TMP_SECONDS +/- 60 and so passes for any value of it. The
+    # window has to be longer than the slowest cycle - otherwise the sweep
+    # deletes a temp file a concurrent writer is still using and breaks its
+    # os.replace - and short enough that a crashed run does not leave
+    # litter around for a day.
+    assert core.STALE_TMP_SECONDS == 600
+
+
 def test_sweep_deletes_a_tmp_older_than_ten_minutes(tmp_path):
     stale = tmp_path / "FuelMix.abc.tmp"
     stale.write_bytes(b"x")
-    age(stale, core.STALE_TMP_SECONDS + 60)
+    age(stale, 601)
     core.sweep_stale_tmp(tmp_path)
     assert not stale.exists()
+
+
+@pytest.fixture
+def frozen_sweep_clock(monkeypatch):
+    """Freeze core.time.time, and return the instant it is frozen at.
+
+    sweep_stale_tmp recomputes `time.time() - STALE_TMP_SECONDS` internally,
+    a moment after a test backdates a file, so the exact boundary is
+    unreachable while the clock is still moving: a file aged to precisely
+    600 seconds is already 600-and-a-bit by the time the cutoff is taken.
+    Freezing makes both boundary cases deterministic, the way test_guard.py
+    freezes guard._now to pin the lease boundaries to the second.
+    """
+    frozen = 1_800_000_000.0
+    monkeypatch.setattr(core.time, "time", lambda: frozen)
+    return frozen
+
+
+def test_sweep_keeps_a_tmp_exactly_at_the_cutoff(tmp_path, frozen_sweep_clock):
+    # The comparison is `<`, so a file of exactly the window's age survives.
+    # Neither this case nor the one below is reachable by the +/- 60 tests.
+    edge = tmp_path / "FuelMix.edge.tmp"
+    edge.write_bytes(b"x")
+    at_cutoff = frozen_sweep_clock - 600
+    os.utime(edge, (at_cutoff, at_cutoff))
+    core.sweep_stale_tmp(tmp_path)
+    assert edge.exists()
+
+
+def test_sweep_deletes_a_tmp_one_second_older_than_the_cutoff(
+        tmp_path, frozen_sweep_clock):
+    past = tmp_path / "FuelMix.past.tmp"
+    past.write_bytes(b"x")
+    older = frozen_sweep_clock - 601
+    os.utime(past, (older, older))
+    core.sweep_stale_tmp(tmp_path)
+    assert not past.exists()
 
 
 def test_sweep_keeps_a_tmp_a_concurrent_writer_may_still_be_using(tmp_path):
@@ -826,6 +865,38 @@ def test_an_unsafe_key_deletes_nothing(tmp_path, key):
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+@pytest.mark.parametrize("key", [".hidden", "a" * 65, "with space", "a.b",
+                                 "FuelMix.bak"])
+def test_an_unsafe_key_does_not_delete_the_file_it_names(tmp_path, key):
+    # The test above starts from an empty directory, so it holds even if
+    # _prune_payloads did nothing at all. This one puts the file the key
+    # names on disk first, so the assertion has something to protect.
+    victim = tmp_path / f"{key}.json"
+    victim.write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {key: {}}, {"FuelMix": {}})
+    assert victim.exists()
+
+
+@pytest.mark.parametrize("key", ["FuelMix/../outside", "sub/../../outside",
+                                 "FuelMix.bak", "Fuel Mix"])
+def test_a_key_safe_only_at_its_start_deletes_nothing(tmp_path, key):
+    # SAFE_KEY.fullmatch, not .match. Every key here begins with characters
+    # the pattern accepts and then leaves the safe set, so an unanchored
+    # match admits them - and the first two escape the directory entirely.
+    # The sub/ directory is what makes this bite: without an existing path
+    # component the unlink would fail with FileNotFoundError for the wrong
+    # reason and the test would pass against a broken gate.
+    (tmp_path / "sub").mkdir()
+    outside = tmp_path.parent / "outside.json"
+    outside.write_bytes(b"{}")
+    inside = tmp_path / f"{key}.json"
+    inside.parent.mkdir(parents=True, exist_ok=True)
+    inside.write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {key: {}}, {"FuelMix": {}})
+    assert outside.exists()
+    assert inside.exists()
+
+
 @pytest.mark.parametrize("key", [3, None, ("FuelMix",)])
 def test_a_non_string_key_deletes_nothing(tmp_path, key):
     (tmp_path / "FuelMix.json").write_bytes(b"{}")
@@ -1003,6 +1074,41 @@ def test_fetch_sends_the_projects_user_agent(fake_get):
     assert "miso-copilot" in fake_get.calls[0][1]["headers"]["User-Agent"]
 
 
+def test_fetch_bounds_both_the_connect_and_the_read(fake_get):
+    # schedule.DaemonThreadExecutor's whole justification is that a cycle is
+    # bounded - "four links at a 15 second read timeout is up to 80 seconds".
+    # Without a timeout a hung connection blocks the cycle forever, and
+    # max_instances=1 then stops polling permanently with nothing in the log.
+    fetch(fake_get, FakeResponse(GOOD_BODIES["/api/FuelMix"], 200))
+    assert fake_get.calls[0][1]["timeout"] == core.TIMEOUT
+
+
+def test_the_timeout_bounds_the_connect_and_the_read_separately():
+    # A literal, not a re-derivation of core.TIMEOUT: a test that reads the
+    # constant it is pinning passes for every value of it.
+    assert core.TIMEOUT == (5, 15)
+
+
+@pytest.mark.parametrize("status", [100, 199, 201, 202, 203, 204, 206])
+def test_a_2xx_that_is_not_200_is_a_failure(fake_get, status):
+    # The gate is `status != 200`, not `status >= 400`. A 206 Partial Content
+    # carries a truncated body that still parses as JSON and still matches the
+    # shape, so a >= 400 gate would write it to data/raw and record it "ok" -
+    # publishing a half payload to the RAG lane as authoritative.
+    observed = fetch(fake_get,
+                     FakeResponse(GOOD_BODIES["/api/FuelMix"], status))
+    assert observed["ok"] is False
+    assert observed["error"] == f"HTTP {status}"
+
+
+def test_a_206_partial_body_is_never_written(raw, fake_get, monkeypatch):
+    monkeypatch.setenv("MISO_API_BASE", "http://127.0.0.1:9")
+    for path, body in GOOD_BODIES.items():
+        fake_get.set(path, FakeResponse(body, 206))
+    core.poll_once()
+    assert list(raw.glob("*.json")) == [core.status_path(raw)]
+
+
 # --- _poll_endpoint ---------------------------------------------------------
 
 def test_a_guarded_endpoint_that_cannot_claim_is_skipped(tmp_path,
@@ -1010,7 +1116,18 @@ def test_a_guarded_endpoint_that_cannot_claim_is_skipped(tmp_path,
     monkeypatch.setattr(core.guard, "claim", lambda url: False)
     observed = core._poll_endpoint(core.ENDPOINTS[0], GUARDED_BASE,
                                    tmp_path, bypass_guard=False)
-    assert observed == core._skipped_observation()
+    # The literal, not core._skipped_observation(): comparing the function's
+    # output to the same function asserts only that it is deterministic. In
+    # particular last_error must stay None so _merge_observation leaves the
+    # error the endpoint already had in place - a skip is not a failure.
+    assert observed == {
+        "outcome": "skipped",
+        "last_attempt": None,
+        "http_status": None,
+        "bytes": None,
+        "last_error": None,
+        "ref_id": None,
+    }
 
 
 def test_a_skip_writes_no_payload_file(raw, monkeypatch):
@@ -1510,13 +1627,11 @@ def test_the_stubs_empty_payloads_are_recorded_per_endpoint(raw, stub_base,
     assert endpoints["FuelMix"]["outcome"] == "ok"
 
 
-def test_a_stub_cycle_never_touches_the_real_rate_guard(raw, stub_base):
+def test_a_stub_cycle_never_touches_the_real_rate_guard(raw, stub_base,
+                                                        monkeypatch):
     # Loopback bypasses the guard, so no lease file is created at all.
     from backend.poller import guard
 
-    os.environ["MISO_API_BASE"] = stub_base()
-    try:
-        core.poll_once()
-    finally:
-        del os.environ["MISO_API_BASE"]
+    monkeypatch.setenv("MISO_API_BASE", stub_base())
+    core.poll_once()
     assert not guard.guard_path().exists()

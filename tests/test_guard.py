@@ -342,6 +342,29 @@ def test_claim_on_a_different_link_is_not_blocked_by_a_fresh_lease(clock):
     assert guard.claim(OTHER_URL) is True
 
 
+def test_a_granted_claim_restarts_the_60_second_window(clock):
+    # The guard's whole job. Every other test here grants once, or denies
+    # once; this is the only one that grants twice, and it is what pins the
+    # lease being *rewritten* on a grant rather than merely written when
+    # absent. Without it, `leases[url] = ...` can become setdefault() and the
+    # suite stays green while the guard grants every claim forever after the
+    # first minute - which is the IP ban the module exists to prevent.
+    assert guard.claim(URL) is True
+    clock.advance(timedelta(seconds=60))
+    assert guard.claim(URL) is True
+    clock.advance(timedelta(seconds=59))
+    assert guard.claim(URL) is False
+
+
+def test_a_granted_claim_rewrites_the_stored_lease(clock, lease_path):
+    # The same contract read off the file rather than the return value.
+    guard.claim(URL)
+    first = json.loads(lease_path.read_text())[URL]
+    clock.advance(timedelta(seconds=60))
+    guard.claim(URL)
+    assert json.loads(lease_path.read_text())[URL] != first
+
+
 def test_stale_lease_claim_logs_the_poller_was_down_warning(
         clock, lease_aged, caplog):
     lease_aged(timedelta(hours=2))
@@ -352,6 +375,15 @@ def test_stale_lease_claim_logs_the_poller_was_down_warning(
 
 # --- claim: fail closed -----------------------------------------------------
 
+# A chmod-based denial is a no-op for root, which can read a 0o000 file
+# regardless. CI runs as an unprivileged user, but a devcontainer or a
+# `sudo pytest` would otherwise turn these red with a confusing message.
+needs_unprivileged = pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root can read a 0o000 file, so the denial cannot be provoked")
+
+
+@needs_unprivileged
 def test_unreadable_lease_file_denies_the_claim(lease_path):
     lease_path.parent.mkdir(parents=True)
     lease_path.write_text("{}")
@@ -362,6 +394,7 @@ def test_unreadable_lease_file_denies_the_claim(lease_path):
         os.chmod(lease_path, 0o600)
 
 
+@needs_unprivileged
 def test_unreadable_lease_file_raises_guard_unreadable_error(lease_path):
     lease_path.parent.mkdir(parents=True)
     lease_path.write_text("{}")
@@ -373,6 +406,7 @@ def test_unreadable_lease_file_raises_guard_unreadable_error(lease_path):
         os.chmod(lease_path, 0o600)
 
 
+@needs_unprivileged
 def test_unreadable_lease_file_logs_an_error(lease_path, caplog):
     lease_path.parent.mkdir(parents=True)
     lease_path.write_text("{}")
@@ -529,11 +563,19 @@ def test_claim_succeeds_again_after_an_unreadable_lease_file(
 def test_lock_retries_while_held_and_succeeds_once_released(
         lease_path, hold_lock):
     import threading
+    import time
     lease_path.parent.mkdir(parents=True)
     handle = hold_lock(lease_path)
     threading.Timer(0.2, handle.close).start()
+    started = time.monotonic()
     acquired = guard._lock(lease_path)
+    waited = time.monotonic() - started
     guard._unlock(acquired)
+    # The assertion is the point: without it this test passes just as well
+    # when _lock never blocks at all, and it is the only test of the retry
+    # loop. Acquiring the lock only after the holder released it is the
+    # behavior, so the call has to have taken at least that long.
+    assert waited >= 0.2
 
 
 def test_lock_raises_once_the_timeout_expires(

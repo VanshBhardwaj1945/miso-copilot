@@ -12,12 +12,20 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the floor the project supports; 3.14 is what the lane was
+        # developed and measured on. The gap matters here more than usual -
+        # fork() semantics, zoneinfo and json recursion limits are all things
+        # this suite leans on, and all three have moved across that range.
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "${{ matrix.python-version }}"
 
       - name: Install dependencies
         run: |
@@ -31,8 +39,10 @@ jobs:
         # pytest.ini already carries --cov and --cov-fail-under=90, so a drop
         # in coverage fails the job the same way a failing test does.
         #
-        # No MISO endpoint is contacted: 561 of the tests need no socket at
-        # all and the rest drive a stub bound to 127.0.0.1. MISO rate-limits
-        # by IP, and a CI runner hammering them from a shared address is
-        # exactly the traffic that gets an organization banned.
+        # No MISO endpoint is contacted: nearly every test needs no socket
+        # at all, the rest drive a stub bound to 127.0.0.1, and conftest.py
+        # replaces requests.get at import time with one that refuses any
+        # non-loopback host. MISO rate-limits by IP, and a CI runner hitting
+        # them from a shared address is exactly the traffic that gets an
+        # organization banned.
         run: pytest

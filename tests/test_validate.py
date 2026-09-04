@@ -15,7 +15,7 @@ import json
 import pytest
 
 from backend.poller import core
-from tests.conftest import GOOD_BODIES, GOOD_REF_IDS
+from tests.support import GOOD_BODIES, GOOD_REF_IDS
 
 
 def endpoint(key):

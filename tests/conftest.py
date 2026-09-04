@@ -9,13 +9,16 @@ claimed. The fixture below is autouse so that isolation is not something a
 test author has to remember.
 """
 
+from urllib.parse import urlsplit
+
 import pytest
+import requests
 
+from tests.support import FakeResponse, GOOD_BODIES
 
-def pytest_configure(config):
-    """Register the marks this suite uses, so -W error stays usable."""
-    config.addinivalue_line(
-        "markers", "slow: takes over a second, usually by forking processes")
+# The `slow` marker is declared in pytest.ini, which --strict-markers reads.
+# Registering it a second time here would be dead code at best and a second,
+# disagreeing description at worst.
 
 
 @pytest.fixture(autouse=True)
@@ -39,19 +42,8 @@ def cache_dir(tmp_path, monkeypatch):
 #
 # No test in this suite makes a request to misoenergy.org or to any host
 # other than a stub bound to 127.0.0.1. Most drive requests.get through the
-# `fake_get` fixture and open no socket at all.
-
-import sys                                          # noqa: E402
-from pathlib import Path                            # noqa: E402
-
-import requests                                     # noqa: E402
-
-# The tests import `backend.poller.core` and `tests.stub.server`, both of
-# which resolve from the repo root. `python -m pytest` puts the working
-# directory on sys.path, but a bare `pytest` does not.
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# `fake_get` fixture and open no socket at all; the backstop further down
+# enforces that rather than trusting it.
 
 
 # Every environment variable the ingestion lane reads apart from
@@ -63,35 +55,6 @@ POLLER_ENV_VARS = (
     "MISO_POLL_SECONDS",
     "MISO_POLLER_ENABLED",
 )
-
-# Minimal payloads that pass each endpoint's shape gate, keyed by path.
-# Hand-written, not captured: no MISO data belongs in the repo.
-GOOD_BODIES = {
-    "/api/FuelMix": (
-        b'{"RefId": "ref-fuelmix", "TotalMW": "1000", '
-        b'"Fuel": {"Type": []}}'
-    ),
-    "/api/RealTimeTotalLoad": (
-        b'{"LoadInfo": {"RefId": "ref-load", "LoadValues": []}}'
-    ),
-    "/api/Snapshot": (
-        b'[{"t": "Current Demand (MW)", "v": "1,000", '
-        b'"d": "1/01/1970 12:00:00 AM EST", "id": "demand"}]'
-    ),
-    "/api/WindSolar/GetCombined": (
-        b'{"instance": "stub", "RefId": "ref-windsolar", '
-        b'"MktDay": "1970-01-01"}'
-    ),
-}
-
-# The ref_id each GOOD_BODIES payload yields, keyed by endpoint. Snapshot
-# carries no RefId at any level and is permanently None.
-GOOD_REF_IDS = {
-    "FuelMix": "ref-fuelmix",
-    "RealTimeTotalLoad": "ref-load",
-    "Snapshot": None,
-    "WindSolar": "ref-windsolar",
-}
 
 
 @pytest.fixture(autouse=True)
@@ -115,14 +78,6 @@ def raw(poller_env):
     return poller_env
 
 
-class FakeResponse:
-    """The two attributes core reads off a requests response."""
-
-    def __init__(self, content=b"", status_code=200):
-        self.content = content
-        self.status_code = status_code
-
-
 class FakeGet:
     """A stand-in for requests.get, routed by the tail of the URL.
 
@@ -137,10 +92,6 @@ class FakeGet:
 
     def set(self, suffix, value):
         self.routes[suffix] = value
-
-    def set_all(self, value):
-        for path in GOOD_BODIES:
-            self.routes[path] = value
 
     def serve_good(self):
         for path, body in GOOD_BODIES.items():
@@ -164,6 +115,38 @@ def fake_get(monkeypatch):
     fake = FakeGet()
     monkeypatch.setattr(requests, "get", fake)
     return fake
+
+
+# --- the backstop -----------------------------------------------------------
+#
+# `fake_get` replaces requests.get per test, and every test that fetches is
+# supposed to use it. Supposed to is not an invariant: a scheduler test starts
+# a daemon thread that APScheduler shuts down with wait=False, so the thread
+# can still be alive after monkeypatch has restored the real core.poll_once
+# and unset MISO_RAW_DIR. Measured, not hypothetical - at that instant
+# base_url() resolves to https://public-api.misoenergy.org and raw_dir() to
+# the repo's own data/raw.
+#
+# So requests.get is replaced here at import time, at module scope, where no
+# fixture teardown reaches it. Loopback passes through to the real requests
+# for the stub-server tests; anything else raises. monkeypatch.setattr in
+# `fake_get` still shadows this per test and restores back to it afterwards.
+
+_real_get = requests.get
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _refuse_non_loopback(url, **kwargs):
+    """The real requests.get for loopback; AssertionError for anything else."""
+    host = urlsplit(url).hostname or ""
+    if host not in _LOOPBACK:
+        raise AssertionError(
+            f"a test tried to reach {host!r} - the suite contacts no host "
+            f"but a stub on 127.0.0.1 (url={url!r})")
+    return _real_get(url, **kwargs)
+
+
+requests.get = _refuse_non_loopback
 
 
 @pytest.fixture
