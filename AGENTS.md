@@ -28,6 +28,7 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
+tests/                      # pytest suite for backend/poller/, plus the MISO stub
 docs/                       # architecture diagram (arch-v1.png + .excalidraw source)
 ingest/                     # (planned) one-time LlamaIndex document ingestion
 data/                       # gitignored, never commit. Chroma persistence, plus
@@ -77,9 +78,21 @@ Streamlit UI (fallback):
 streamlit run app.py
 ```
 
-There is no test suite yet. Minimum verification for any change: the touched UI
-boots and a chat message round-trips (stub answer / graceful handoff is fine). If
-you add backend code, also verify `uvicorn` boots and `/ask` responds. The React
+The ingestion lane (`backend/poller/`) has a test suite. Run it with a bare
+`pytest` - `pytest.ini` supplies the paths, coverage and a 90 percent floor, so
+a drop fails the run the same way a failing test does. It needs no network:
+almost every test runs without a socket and the rest drive a stub on
+127.0.0.1, so it never contacts MISO. CI runs it on every push.
+
+```bash
+pip install pytest pytest-cov   # dev tools, deliberately not in requirements.txt
+pytest
+```
+
+Nothing else is covered yet. For the rest, minimum verification for any change:
+the touched UI boots and a chat message round-trips (stub answer / graceful
+handoff is fine). If you add backend code, also verify `uvicorn` boots and
+`/ask` responds. The React
 dev server proxies `/ask` to `localhost:8000` (vite.config.js) - keep that
 contract: `POST /ask {question}` → `{answer, sources[{title,url}], as_of}`.
 `answer` is markdown and may contain LaTeX (`$...$`/`$$...$$`) and ` ```chart `

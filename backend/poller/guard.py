@@ -268,12 +268,19 @@ def _flock(handle) -> None:
 
 
 def _unlock(handle) -> None:
-    """Release the lock and close the handle, never raising."""
-    with contextlib.suppress(OSError):
+    """Release the lock and close the handle, never raising.
+
+    ValueError is suppressed alongside OSError because fileno() on an
+    already-closed handle raises it, and OSError alone let that escape a
+    function whose whole contract is not to. Nothing reaches it today - both
+    call sites hand over a live handle exactly once - but a double unlock is
+    the kind of thing a later edit introduces quietly.
+    """
+    with contextlib.suppress(OSError, ValueError):
         import fcntl
 
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(OSError, ValueError):
         handle.close()
 
 

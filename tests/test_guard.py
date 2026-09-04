@@ -551,17 +551,22 @@ def test_unlock_closes_the_handle_it_was_given(lease_path):
     assert handle.closed is True
 
 
-def test_unlock_of_an_already_closed_handle_raises_value_error(lease_path):
-    # Documents a gap rather than a behavior we want. _unlock's docstring
-    # says "never raising", but it suppresses OSError only, and fileno()
-    # on a closed handle raises ValueError. claim and file_lock each call
-    # _unlock exactly once on a live handle, so nothing reaches this
-    # today; a second call, or a caller that closed first, would crash.
+def test_unlock_of_an_already_closed_handle_does_not_raise(lease_path):
+    # _unlock's docstring promises it never raises. It used to suppress
+    # OSError only, and fileno() on a closed handle raises ValueError, so a
+    # double unlock crashed. Nothing reaches it today, which is exactly why
+    # a later edit could reintroduce it unnoticed.
     lease_path.parent.mkdir(parents=True)
     handle = guard._lock(lease_path)
     handle.close()
-    with pytest.raises(ValueError):
-        guard._unlock(handle)
+    guard._unlock(handle)
+
+
+def test_unlock_twice_does_not_raise(lease_path):
+    lease_path.parent.mkdir(parents=True)
+    handle = guard._lock(lease_path)
+    guard._unlock(handle)
+    guard._unlock(handle)
 
 
 # --- concurrency: the reason the module exists ------------------------------
