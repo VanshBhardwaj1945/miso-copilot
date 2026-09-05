@@ -123,6 +123,23 @@ For contributor rules and the full architecture constraints, see
     anyone can automate freely and MISO sees zero extra traffic
   - connects to Claude Desktop / Claude Code / Cursor out of the box
 
+## Known gaps and deferred work
+
+Things we know about and chose not to do yet, so nobody rediscovers them.
+
+- **Documents refresh by hand.** Live data re-syncs every 5 minutes; the nine
+  documents only update when someone re-runs `fetch_docs` + `ingest_docs`. The
+  planned fix is a daily job that asks each URL "changed since last time?"
+  (`If-None-Match` with the ETag both MISO hosts already send - a few bytes when
+  nothing changed) and re-ingests only what did. Deferred until MISO's mentors
+  confirm a once-a-day check of ~10 URLs is fine.
+- **Source chips cite what was retrieved, not what was used.** A "how many
+  states?" answer can show a live-snapshot chip it never drew on, because the
+  retriever hands Claude one seat per lane and the chips list every seat. Fix
+  is asking Claude which sources it used; cosmetic, parked.
+- **Two processes must not write Chroma at once.** Stop the backend before
+  running `ingest_docs`. Not enforced by code, only by this sentence.
+
 ## Team
 
 Fall 2026 MISO Xtern Challenge - Prompt 1. Demo day: Sept 11, MISO HQ, Carmel, IN.
