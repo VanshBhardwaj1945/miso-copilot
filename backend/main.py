@@ -30,6 +30,13 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Update Chroma from data/raw/ immediately on boot
+    try:
+        from backend.rag.ingest_api import sync_raw_snapshots
+        sync_raw_snapshots()
+    except Exception as err:
+        log.warning("Initial RAG snapshot sync skipped: %s", err)
+
     """Start the poller at boot and stop it at shutdown.
 
     The first cycle is scheduled rather than awaited: four network fetches in
