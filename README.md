@@ -22,6 +22,10 @@ with a source link, sourced from MISO's own public data.
 
 ![MISO Copilot architecture](docs/architecture.svg)
 
+Want the full picture? A more detailed version lives in
+[`docs/architecture-detailed.svg`](docs/architecture-detailed.svg)
+([PNG](docs/architecture-detailed.png)).
+
 The key design choice: **we never call MISO's API at question time.** A background
 poller keeps a fresh local copy, and questions are answered from that copy. If MISO's
 API goes down mid-demo, the app keeps answering - it just says how old its data is
@@ -83,7 +87,7 @@ backend/
   poller/          #   5-min poller with a hard rate guard
 app.py             # Streamlit backup UI
 tests/             # poller test suite
-docs/              # architecture diagram (arch-v1.png)
+docs/              # architecture diagrams (simple + detailed)
 data/              # local data + vector store (gitignored)
 ```
 
