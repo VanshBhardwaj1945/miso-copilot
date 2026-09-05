@@ -1,0 +1,18 @@
+{
+  "LoadInfo": {
+    "RefId": "01-Jan-1970 - Interval 00:00 EST",
+    "ClearedMW": [
+      {"ClearedMWHourly": {"Hour": "1", "Value": "1000"}},
+      {"ClearedMWHourly": {"Hour": "2", "Value": "1100"}}
+    ],
+    "MediumTermLoadForecast": [
+      {"Forecast": {"HourEnding": "1", "LoadForecast": "1050"}},
+      {"Forecast": {"HourEnding": "2", "LoadForecast": "1150"}}
+    ],
+    "FiveMinTotalLoad": [
+      {"Load": {"Time": "00:00", "Value": "1000"}},
+      {"Load": {"Time": "00:05", "Value": "1010"}},
+      {"Load": {"Time": "00:10", "Value": "1020"}}
+    ]
+  }
+}

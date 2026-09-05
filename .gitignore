@@ -17,3 +17,8 @@ chroma_db/
 .DS_Store
 .idea/
 .vscode/
+
+# coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/

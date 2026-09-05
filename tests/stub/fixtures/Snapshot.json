@@ -1,0 +1,14 @@
+[
+  {
+    "t": "Current Demand (MW)",
+    "v": "1,000",
+    "d": "1/01/1970 12:00:00 AM EST",
+    "id": "stub-current-demand"
+  },
+  {
+    "t": "Marginal Energy Cost ($/MWH)",
+    "v": "$10.00",
+    "d": "1/01/1970 12:00:00 AM EST",
+    "id": "stub-marginal-energy-cost"
+  }
+]

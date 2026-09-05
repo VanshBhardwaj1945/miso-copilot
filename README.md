@@ -9,9 +9,13 @@ Navigation of MISO's Public Information*.
 
 ```mermaid
 flowchart LR
-    subgraph FEED["BACKGROUND FEED - runs every 15 min"]
-        POLL["Poller<br/>(APScheduler in FastAPI, 15 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, Load, LMP...)"]
-        MISOAPI --> SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
+    subgraph FEED["BACKGROUND FEED - runs every 5 min"]
+        POLL["Poller<br/>(APScheduler in FastAPI, 5 min)"] --> MISOAPI["MISO Public APIs<br/>public-api.misoenergy.org<br/>(FuelMix, RealTimeTotalLoad,<br/>Snapshot, WindSolar)"]
+        MISOAPI --> RAW[("data/raw/*.json - verbatim<br/>+ _status.json")]
+    end
+
+    subgraph RAGLANE["RAG LANE - separate workstream"]
+        SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
     end
 
     subgraph ASK["QUESTION TIME"]
@@ -26,13 +30,14 @@ flowchart LR
 
     DB[("Chroma vector DB - the ONLY store<br/>live snapshots (upserted)<br/>+ docs (one-time)")]
 
+    RAW -- "the RAG lane reads the files;<br/>the poller never writes Chroma" --> SUMM
     SUMM -- "UPSERT via LlamaIndex (no chunking -<br/>snapshots are small): one doc per<br/>endpoint, fixed ID - replaces old" --> DB
     CLAUDE -- "search_docs() = LlamaIndex<br/>retriever → top chunks" --> DB
     LI -- "runs ONCE (polite fetch)" --> DB
     CLAUDE -. "answer + 'as of 6:55 PM' + source link" .-> USER
 
     subgraph NOTES["NOTES"]
-        N1["RULE: never APPEND snapshots.<br/>UPSERT/overwrite - or search<br/>retrieves stale data."] ~~~ N2["Tradeoff (own it to judges):<br/>answers ≤15 min stale, but ZERO<br/>live dependencies on demo day"] ~~~ N3["Chroma is the only store.<br/>Poller dies? Last snapshot stays -<br/>degrades gracefully, never breaks"] ~~~ N4["No answer? Graceful handoff to<br/>MISO contact form (humans keep<br/>only the hard questions)"]
+        N1["RULE: never APPEND snapshots.<br/>UPSERT/overwrite - or search<br/>retrieves stale data."] ~~~ N2["Tradeoff (own it to judges):<br/>answers about 10 min stale, but ZERO<br/>live dependencies on demo day"] ~~~ N3["Chroma is the only store.<br/>Poller dies? Last snapshot stays -<br/>degrades gracefully, never breaks"] ~~~ N4["No answer? Graceful handoff to<br/>MISO contact form (humans keep<br/>only the hard questions)"]
     end
 
     classDef note fill:#fff9db,stroke:#f08c00,color:#1e1e1e
@@ -55,8 +60,11 @@ a source link, sourced from MISO's own public data.
 ## Architecture (pull-based RAG)
 
 ```
-BACKGROUND (every 15 min)
-  Poller → MISO public APIs → JSON→plain-English snapshot → UPSERT into Chroma (fixed IDs)
+BACKGROUND FEED (every 5 min)
+  Poller → MISO public APIs → verbatim JSON written to data/raw/ (+ _status.json)
+
+RAG LANE (separate workstream, reads those files)
+  data/raw/*.json → plain-English snapshot → UPSERT into Chroma (fixed IDs)
 
 ONE-TIME
   MISO docs & reports → LlamaIndex pipeline (load → chunk → embed) → Chroma
@@ -69,13 +77,17 @@ QUESTION TIME
 Key design decisions:
 
 - **Pull-based, not call-time**: no live API dependency at question time - the demo works
-  even if MISO's APIs are down. Tradeoff: answers are ≤15 min stale (stated in every
-  answer as "as of \<time\>").
-- **UPSERT, never append**: one document per API endpoint with a fixed ID, overwritten
-  each poll cycle, so retrieval can never surface a stale snapshot.
-- **JSON → prose before embedding**: snapshots are stored as natural-language paragraphs
-  ("As of 6:55 PM EST, total generation is 114,136 MW; natural gas leads with…") because
-  prose embeds well and raw JSON doesn't.
+  even if MISO's APIs are down. Tradeoff: answers are about 10 min stale - the 5-min poll
+  cadence plus MISO's own publication lag - stated in every answer as "as of \<time\>".
+- **The two lanes meet on disk**: the poller only fetches and writes verbatim JSON to
+  `data/raw/`; the RAG lane only reads those files. No shared function and no import
+  across the boundary, so either side can be built while the other isn't running.
+- **UPSERT, never append** (the RAG lane's job, not the poller's): one document per API
+  endpoint with a fixed ID, overwritten each poll cycle, so retrieval can never surface a
+  stale snapshot.
+- **JSON → prose before embedding** (also the RAG lane's): snapshots are stored as
+  natural-language paragraphs ("As of 6:55 PM EST, total generation is 114,136 MW; natural
+  gas leads with…") because prose embeds well and raw JSON doesn't.
 - **Citations everywhere**: every answer carries its source URL - the link *is* the
   product for "where do I find X" questions.
 
@@ -140,8 +152,9 @@ streamlit run app.py
 The React dev server proxies `/ask` to `localhost:8000` (no CORS setup needed).
 Without a key the backend returns 503 and the widget shows a graceful handoff to
 MISO's contact form. The current backend sends every question straight to Claude
-(Opus 5) with a MISO system prompt; the RAG store (Chroma + LlamaIndex) and the
-15-min poller land next.
+(Opus 5) with a MISO system prompt; the 5-min poller now writes verbatim MISO
+JSON into `data/raw/`, and the RAG store (Chroma + LlamaIndex) that reads those
+files lands next.
 
 Answers are markdown and both UIs render it: bold/tables/lists, inline links,
 code blocks, LaTeX math (KaTeX, real symbols and fractions), and charts - the
@@ -160,11 +173,12 @@ backend/                      # FastAPI app
   routes/                     #   /ask and /health endpoints
   llm/                        #   Claude client + system prompt
   rag/                        #   (planned) Chroma + LlamaIndex retrieval
-  poller/                     #   (planned) 15-min poller + JSON->prose summarizers
+  poller/                     #   5-min poller: verbatim MISO JSON into data/raw/
 app.py                        # Streamlit chat UI (fallback; talks to the same backend)
 docs/                         # architecture diagram: arch-v1.png + .excalidraw source
 ingest/                       # (planned) one-time LlamaIndex document ingestion
-data/                         # Chroma persistence (gitignored)
+data/                         # Chroma persistence, data/raw/ (poller output),
+                              #   data/raw.backup/ (demo fallback) - gitignored
 ```
 
 A full rendering of the architecture lives in [`docs/arch-v1.png`](docs/arch-v1.png);

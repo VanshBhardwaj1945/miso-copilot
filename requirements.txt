@@ -3,9 +3,9 @@ requests>=2.32
 fastapi
 uvicorn
 anthropic
+apscheduler
 
-# Coming with the RAG store / ingestion (uncomment as they land):
-# apscheduler
+# Coming with the RAG store (uncomment as they land):
 # llama-index
 # llama-index-vector-stores-chroma
 # llama-index-embeddings-huggingface
