@@ -1,7 +1,4 @@
-'''
-Read raw poller JSON
- and UPSERT into Chroma via LlamaIndex
-'''
+"""Read raw poller JSON and UPSERT into Chroma: one doc per endpoint, fixed id."""
 
 import json
 import logging
@@ -24,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PRIMARY_RAW_DIR = REPO_ROOT / "data" / "raw"
 BACKUP_RAW_DIR = REPO_ROOT / "data" / "raw.backup"
 
-# registry mapping endpoint JSON file to fixed doc_id and transformer
+# Endpoint JSON file -> (fixed Chroma doc id, JSON->prose transformer).
 ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] = {
     "FuelMix.json": ("miso_snapshot_fuelmix", transform_fuelmix),
     "RealTimeTotalLoad.json": ("miso_snapshot_load", transform_load),
@@ -34,22 +31,25 @@ ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] =
 
 
 def _resolve_raw_file(filename: str) -> Path | None:
-    """Prefer data/raw/, fallback to data/raw.backup/ if needed"""
+    """The primary raw file, or the demo backup if it is missing/empty."""
     primary = PRIMARY_RAW_DIR / filename
     if primary.exists() and primary.stat().st_size > 0:
         return primary
     backup = BACKUP_RAW_DIR / filename
     if backup.exists() and backup.stat().st_size > 0:
-        log.warning("Primary %s missing; falling back to demo backup %s", filename, backup)
+        log.warning("Primary %s missing; falling back to demo backup %s",
+                    filename, backup)
         return backup
     return None
 
 
-def upsert_single_endpoint(filename: str, doc_id: str, transformer: Callable) -> bool:
-    """Reads one endpoint file, formats prose, and UPSERTs into Chroma."""
+def upsert_single_endpoint(filename: str, doc_id: str,
+                           transformer: Callable) -> bool:
+    """Read one endpoint file, render it as prose, and UPSERT it into Chroma."""
     path = _resolve_raw_file(filename)
     if not path:
-        log.warning("Endpoint file %s not found in raw or backup directories.", filename)
+        log.warning("Endpoint file %s not found in raw or backup directories.",
+                    filename)
         return False
 
     try:
@@ -62,16 +62,14 @@ def upsert_single_endpoint(filename: str, doc_id: str, transformer: Callable) ->
     collection = get_chroma_collection()
     index = get_index()
 
-    # NEVER APPEND. Evict old document with this doc_id
+    # NEVER APPEND - delete the old snapshot first, or search returns stale copies
     try:
         collection.delete(where={"doc_id": doc_id})
-        log.info("Evicted prior snapshot for %s", doc_id)
     except Exception as err:
         log.debug("No previous entry to delete for %s (%s)", doc_id, err)
 
-    # build unchunked Document with fixed doc_id
+    # no chunking - snapshots are already one small paragraph
     doc = Document(
-        doc_id=doc_id,
         id_=doc_id,
         text=prose,
         metadata={
@@ -85,12 +83,12 @@ def upsert_single_endpoint(filename: str, doc_id: str, transformer: Callable) ->
     )
 
     index.insert(doc)
-    log.info("Successfully upserted snapshot '%s' (as of %s)", doc_id, as_of)
+    log.info("Upserted snapshot '%s' (as of %s)", doc_id, as_of)
     return True
 
 
 def sync_raw_snapshots() -> dict[str, bool]:
-    """Sync all available API JSON snapshots from disk into Chroma."""
+    """Sync every raw API snapshot from disk into Chroma. Returns per-file success."""
     results = {}
     for filename, (doc_id, transformer) in ENDPOINTS_CONFIG.items():
         results[filename] = upsert_single_endpoint(filename, doc_id, transformer)

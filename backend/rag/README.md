@@ -1,18 +1,23 @@
-# backend/rag (planned)
+# backend/rag
 
-Chroma + LlamaIndex retrieval layer, per the architecture in the root README:
+Chroma + LlamaIndex retrieval layer. Implemented; the doc corpus is the one
+piece still empty.
 
-- Chroma embedded vector store (local persistence in `data/`, gitignored) -
-  the ONLY store. `data/` has two tenants: this persistence, and the
-  poller's `data/raw/` (plus its `data/raw.backup/` demo fallback), which
-  are files nothing queries.
-- LlamaIndex retriever (`index.as_retriever(similarity_top_k=4)`) backing the
-  single `search_docs(query)` tool given to Claude.
-- Doc feed: load -> `SentenceSplitter` chunks (~512 tokens, ~50 overlap) ->
-  embed (sentence-transformers all-MiniLM-L6-v2) -> Chroma.
-- Snapshot feed, read from `data/raw/*.json` (verbatim MISO JSON the
-  poller writes, with `data/raw/_status.json` beside it for freshness and
-  health): turn each endpoint's JSON into prose here, then store it as one
-  small `Document` per endpoint with a fixed `doc_id`, UPSERTed (delete +
-  insert), never chunked, never appended. The poller writes no prose and no
-  Chroma - all of that is this lane's.
+- `store.py` - Chroma embedded store (persists in `data/chroma/`, gitignored)
+  + local embeddings (all-MiniLM-L6-v2). The ONLY store.
+- `transformers.py` - each endpoint's raw JSON -> a plain-English snapshot
+  paragraph (raw JSON embeds badly; prose matches how people ask).
+- `ingest_api.py` - reads `data/raw/*.json` (falls back to `data/raw.backup/`),
+  UPSERTs one `Document` per endpoint under a fixed id. Never chunked, never
+  appended. Runs at server boot via `main.py`.
+- `retriever.py` - `search_docs(query)`: top-4 vector search over the same
+  collection, returns context + source links + freshest "as of".
+- `ingest_docs.py` - one-time chunked ingestion for reference documents.
+  Put files in `data/docs/` and run `python -m backend.rag.ingest_docs`.
+  **`data/docs/` is currently empty** - the "where do I find X" lane has
+  nothing to search until it's fed.
+
+Known gap: Chroma only syncs from `data/raw/` at boot. The poller keeps
+refreshing the files every 5 min, but nothing re-syncs Chroma after startup -
+answers freeze at boot-time data until the server restarts. Fix planned:
+call `sync_raw_snapshots()` after each successful poll cycle.

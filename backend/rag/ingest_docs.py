@@ -1,6 +1,4 @@
-'''
-static document chunking and ingestion (one-time)
-'''
+"""One-time doc ingestion: put files in data/docs/, run python -m backend.rag.ingest_docs."""
 
 from pathlib import Path
 from llama_index.core import SimpleDirectoryReader
@@ -32,9 +30,10 @@ def ingest_general_docs():
     # add to the SAME Chroma collection
     index = get_index()
     for doc in documents:
-        # add metadata for citations
+        # filename goes in title, not source_url - the UI renders source_url as a link
+        # TODO: map ingested files to their real misoenergy.org URLs
         doc.metadata["doc_type"] = "reference_doc"
-        doc.metadata["source_url"] = doc.metadata.get("file_name", "MISO Reference Document")
+        doc.metadata["title"] = doc.metadata.get("file_name", "MISO Reference Document")
         
         nodes = splitter.get_nodes_from_documents([doc])
         index.insert_nodes(nodes)

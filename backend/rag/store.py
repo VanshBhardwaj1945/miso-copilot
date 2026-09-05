@@ -1,6 +1,4 @@
-'''
-Chroma vector store and LlamaIndex initialization.
-'''
+"""Chroma vector store and LlamaIndex setup (local embeddings, no API cost)."""
 
 from pathlib import Path
 import chromadb

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import anthropic
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.llm import claude
 
@@ -13,7 +13,8 @@ router = APIRouter()
 
 
 class AskRequest(BaseModel):
-    question: str
+    # capped so a huge body can't run up embedding/Claude costs
+    question: str = Field(min_length=1, max_length=2000)
 
 
 @router.post("/ask")

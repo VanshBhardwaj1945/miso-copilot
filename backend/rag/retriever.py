@@ -1,6 +1,4 @@
-'''
-LlamaIndex retriever backing the search_docs tool for Claude
-'''
+"""LlamaIndex retriever backing the search_docs step of every answer."""
 
 from backend.rag.store import get_index
 
