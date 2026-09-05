@@ -20,6 +20,7 @@ chroma_db/
 
 # personal notes — never part of the product
 learn.md
+agent-handoff.md
 
 # local debug artifacts
 .playwright-mcp/

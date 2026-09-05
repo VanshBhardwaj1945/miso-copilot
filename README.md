@@ -5,7 +5,7 @@ plain-English questions about MISO's public data - so routine questions get answ
 seconds instead of becoming emails to MISO's CSR and External Affairs teams.
 
 Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intelligent
-Navigation of MISO's Public Information*.
+Navigation of MISO's Public Information* ([the full prompt, explained](docs/prompt.md)).
 
 ## The problem
 
