@@ -1,18 +1,14 @@
-name: security
+name: pr-gate
 
-# The security half of CI (tests.yml is the quality half):
-#   SAST     - bandit over the backend
-#   secrets  - gitleaks over the full history
-#   SCA      - pip-audit + npm audit (report-only: torch is pinned for
-#              Intel-Mac dev machines and drags known CVEs we can't take)
-#   IaC      - terraform fmt + validate on infra/
-#   build    - the React frontend must compile
-#   DAST     - OWASP ZAP baseline scan against a booted backend
+# Fast, deterministic checks that gate a PR (mark these as required checks in
+# branch protection and a PR cannot merge until they're green). The slower,
+# heavier jobs run after merge - see post-merge.yml. The earliest layer runs
+# before code even leaves a laptop: `pre-commit install` (.pre-commit-config.yaml).
 
 on:
+  pull_request:
   push:
     branches: ["**"]
-  pull_request:
 
 # nothing in this workflow may ever contact MISO
 env:
@@ -40,22 +36,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  dependency-audit:
-    runs-on: ubuntu-latest
-    continue-on-error: true # report-only, see header comment
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pip-audit
-      - run: pip-audit -r requirements.txt --no-deps
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: npm audit --audit-level=high
-        working-directory: frontend
-
   iac:
     runs-on: ubuntu-latest
     steps:
@@ -81,30 +61,3 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-
-  dast:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      # no CLAUDE_API_KEY on purpose: /ask serves its 503 handoff path, and
-      # MISO_POLLER_ENABLED=0 (workflow env) keeps CI traffic away from MISO
-      - name: Boot the backend
-        run: |
-          nohup python -m uvicorn backend.main:app --port 8000 &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/health && break
-            sleep 2
-          done
-          curl -sf http://127.0.0.1:8000/health
-      - name: ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.14.0
-        with:
-          target: http://127.0.0.1:8000
-          allow_issue_writing: false
-          # baseline scan warns rather than fails by default; findings land
-          # in the job log and the uploaded report artifact
