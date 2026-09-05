@@ -1,5 +1,7 @@
 # MISO Copilot - reference cloud deployment (NOT deployed; nothing here has run).
-# A sketch of what production could look like, kept honest and small.
+# Production-shaped: AKS for scale, WAF in front, Redis for shared state,
+# logs forwarded to SIEM. App manifests (Deployments/Ingress) would live in
+# k8s/, not here - this file is the platform underneath them.
 
 terraform {
   required_version = ">= 1.9"
@@ -40,7 +42,8 @@ resource "azurerm_resource_group" "main" {
   location = var.location
 }
 
-# logs for the backend + poller (replaces tailing /tmp/miso-backend.log)
+# --- logging -> SIEM -------------------------------------------------------
+
 resource "azurerm_log_analytics_workspace" "main" {
   name                = "${var.prefix}-logs"
   location            = azurerm_resource_group.main.location
@@ -48,7 +51,229 @@ resource "azurerm_log_analytics_workspace" "main" {
   retention_in_days   = 30
 }
 
-# persistent disk for data/: Chroma store, raw snapshots, request log
+# forwarded to SIEM: the workspace is onboarded so security gets every
+# request log (ip, question, outcome) and WAF event in one place
+resource "azurerm_sentinel_log_analytics_workspace_onboarding" "siem" {
+  workspace_id = azurerm_log_analytics_workspace.main.id
+}
+
+# --- network + WAF edge ----------------------------------------------------
+
+resource "azurerm_virtual_network" "main" {
+  name                = "${var.prefix}-vnet"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  address_space       = ["10.10.0.0/16"]
+}
+
+resource "azurerm_subnet" "appgw" {
+  name                 = "appgw"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.10.1.0/24"]
+}
+
+resource "azurerm_subnet" "aks" {
+  name                 = "aks"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.10.2.0/23"]
+}
+
+resource "azurerm_public_ip" "appgw" {
+  name                = "${var.prefix}-appgw-ip"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# the firewall + edge rate limiter. Our in-app per-IP limiter stays as
+# defense in depth; this blocks floods before they reach a pod.
+resource "azurerm_web_application_firewall_policy" "main" {
+  name                = "${var.prefix}-waf"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  policy_settings {
+    enabled = true
+    mode    = "Prevention"
+  }
+
+  custom_rules {
+    name                 = "PerIPRateLimit"
+    priority             = 10
+    rule_type            = "RateLimitRule"
+    action               = "Block"
+    rate_limit_duration  = "OneMin"
+    rate_limit_threshold = 60
+    group_rate_limit_by  = "ClientAddr"
+
+    match_conditions {
+      match_variables {
+        variable_name = "RemoteAddr"
+      }
+      operator           = "IPMatch"
+      negation_condition = false
+      match_values       = ["0.0.0.0/0"]
+    }
+  }
+
+  managed_rules {
+    managed_rule_set {
+      type    = "OWASP"
+      version = "3.2"
+    }
+  }
+}
+
+# load balancer: WAF_v2 Application Gateway in front of the cluster.
+# The AGIC addon on AKS keeps its backend pools pointed at the pods, so the
+# listener/pool blocks below are just the required skeleton.
+# TLS cert intentionally omitted from the sketch.
+resource "azurerm_application_gateway" "main" {
+  name                = "${var.prefix}-appgw"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  firewall_policy_id  = azurerm_web_application_firewall_policy.main.id
+
+  sku {
+    name     = "WAF_v2"
+    tier     = "WAF_v2"
+    capacity = 1
+  }
+
+  gateway_ip_configuration {
+    name      = "gateway-ip"
+    subnet_id = azurerm_subnet.appgw.id
+  }
+
+  frontend_port {
+    name = "http"
+    port = 80
+  }
+
+  frontend_ip_configuration {
+    name                 = "public"
+    public_ip_address_id = azurerm_public_ip.appgw.id
+  }
+
+  backend_address_pool {
+    name = "default"
+  }
+
+  backend_http_settings {
+    name                  = "default"
+    cookie_based_affinity = "Disabled"
+    port                  = 8000
+    protocol              = "Http"
+    request_timeout       = 60
+  }
+
+  http_listener {
+    name                           = "default"
+    frontend_ip_configuration_name = "public"
+    frontend_port_name             = "http"
+    protocol                       = "Http"
+  }
+
+  request_routing_rule {
+    name                       = "default"
+    priority                   = 100
+    rule_type                  = "Basic"
+    http_listener_name         = "default"
+    backend_address_pool_name  = "default"
+    backend_http_settings_name = "default"
+  }
+
+  lifecycle {
+    # AGIC rewrites pools/listeners at runtime; Terraform must not fight it
+    ignore_changes = [backend_address_pool, backend_http_settings,
+    http_listener, request_routing_rule, probe]
+  }
+}
+
+# --- the cluster -----------------------------------------------------------
+
+# AKS over raw VMs: autoscaling, rolling deploys, and one place to run the
+# four workloads (see the comment below) instead of hand-managed machines.
+resource "azurerm_kubernetes_cluster" "main" {
+  name                = "${var.prefix}-aks"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  dns_prefix          = var.prefix
+
+  default_node_pool {
+    name                 = "default"
+    vm_size              = "Standard_D2s_v5"
+    auto_scaling_enabled = true
+    min_count            = 2
+    max_count            = 5
+    vnet_subnet_id       = azurerm_subnet.aks.id
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  node_provisioning_profile {
+    mode = "Manual"
+  }
+
+  network_profile {
+    network_plugin = "azure"
+  }
+
+  ingress_application_gateway {
+    gateway_id = azurerm_application_gateway.main.id
+  }
+
+  oidc_issuer_enabled       = true
+  workload_identity_enabled = true
+
+  oms_agent {
+    log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+  }
+}
+
+# Workloads this cluster runs (k8s manifests, not Terraform):
+#   api     - FastAPI /ask, N replicas behind the gateway, HPA on CPU
+#   poller  - EXACTLY 1 replica, same rate-guard rule as AGENTS.md;
+#             splitting it out is what lets the api scale freely
+#   mcp     - the MCP server, its own deployment + service
+#   chroma  - Chroma in client/server mode, 1 replica on a persistent
+#             volume; api/mcp pods query it over HTTP instead of
+#             embedding it (embedded mode can't share across pods)
+
+# --- images ----------------------------------------------------------------
+
+resource "azurerm_container_registry" "main" {
+  name                = "${var.prefix}acr"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "Basic"
+}
+
+resource "azurerm_role_assignment" "aks_pulls_images" {
+  scope                = azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
+}
+
+# --- shared state ----------------------------------------------------------
+
+# answer cache + per-IP rate-limit counters. In-memory state stops working
+# the moment the api has 2 replicas; Redis is where both move.
+resource "azurerm_redis_cache" "main" {
+  name                = "${var.prefix}-redis"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  capacity            = 0
+  family              = "C"
+  sku_name            = "Standard"
+}
+
+# poller snapshots + request log; mounted into the poller and api pods
 resource "azurerm_storage_account" "data" {
   name                     = "${var.prefix}data"
   location                 = azurerm_resource_group.main.location
@@ -60,10 +285,11 @@ resource "azurerm_storage_account" "data" {
 resource "azurerm_storage_share" "data" {
   name               = "copilot-data"
   storage_account_id = azurerm_storage_account.data.id
-  quota              = 5 # GB - Chroma + snapshots are tiny
+  quota              = 16 # GB - snapshots, request log, Chroma volume
 }
 
-# the API key lives in Key Vault; the app reads it with a managed identity
+# --- secrets ---------------------------------------------------------------
+
 resource "azurerm_key_vault" "main" {
   name                       = "${var.prefix}-kv"
   location                   = azurerm_resource_group.main.location
@@ -79,6 +305,8 @@ resource "azurerm_key_vault_secret" "claude_key" {
   key_vault_id = azurerm_key_vault.main.id
 }
 
+# pods read secrets through workload identity; the federated credential
+# binding to a service account happens alongside the k8s manifests
 resource "azurerm_user_assigned_identity" "app" {
   name                = "${var.prefix}-identity"
   location            = azurerm_resource_group.main.location
@@ -91,82 +319,8 @@ resource "azurerm_role_assignment" "app_reads_secrets" {
   principal_id         = azurerm_user_assigned_identity.app.principal_id
 }
 
-resource "azurerm_container_app_environment" "main" {
-  name                       = "${var.prefix}-env"
-  location                   = azurerm_resource_group.main.location
-  resource_group_name        = azurerm_resource_group.main.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-}
+# --- frontend --------------------------------------------------------------
 
-resource "azurerm_container_app_environment_storage" "data" {
-  name                         = "copilot-data"
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  account_name                 = azurerm_storage_account.data.name
-  share_name                   = azurerm_storage_share.data.name
-  access_key                   = azurerm_storage_account.data.primary_access_key
-  access_mode                  = "ReadWrite"
-}
-
-# the FastAPI backend + in-process poller.
-# EXACTLY ONE REPLICA, on purpose: the poller's rate guard is a local file
-# and the scheduler must not run twice (same rule as AGENTS.md's "one
-# worker, one machine"). Scaling reads means splitting the poller out first.
-resource "azurerm_container_app" "backend" {
-  name                         = "${var.prefix}-api"
-  resource_group_name          = azurerm_resource_group.main.name
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  revision_mode                = "Single"
-
-  identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.app.id]
-  }
-
-  secret {
-    name                = "claude-api-key"
-    key_vault_secret_id = azurerm_key_vault_secret.claude_key.id
-    identity            = azurerm_user_assigned_identity.app.id
-  }
-
-  template {
-    min_replicas = 1
-    max_replicas = 1
-
-    container {
-      name   = "api"
-      image  = "ghcr.io/vanshbhardwaj1945/miso-copilot:latest" # built by CI (not set up yet)
-      cpu    = 1.0
-      memory = "2Gi" # embedding model needs the headroom
-
-      env {
-        name        = "CLAUDE_API_KEY"
-        secret_name = "claude-api-key"
-      }
-
-      volume_mounts {
-        name = "data"
-        path = "/app/data"
-      }
-    }
-
-    volume {
-      name         = "data"
-      storage_name = azurerm_container_app_environment_storage.data.name
-      storage_type = "AzureFile"
-    }
-  }
-
-  ingress {
-    external_enabled = true
-    target_port      = 8000
-    traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-  }
-}
-
-# the React frontend, built and served as static files
 resource "azurerm_static_web_app" "frontend" {
   name                = "${var.prefix}-web"
   location            = "centralus"
@@ -175,8 +329,10 @@ resource "azurerm_static_web_app" "frontend" {
   sku_size            = "Free"
 }
 
-output "backend_url" {
-  value = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
+# --- outputs ---------------------------------------------------------------
+
+output "public_entrypoint" {
+  value = azurerm_public_ip.appgw.ip_address
 }
 
 output "frontend_hostname" {

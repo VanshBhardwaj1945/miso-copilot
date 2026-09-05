@@ -1,9 +1,8 @@
 # infra/ — reference cloud deployment
 
-**Nothing here is deployed.** This folder is a sketch of how MISO Copilot
-*could* run in the cloud, written as real, validated Terraform (`terraform
-validate` passes, azurerm ~> 5.4). It exists to show the path from
-laptop-demo to production — for the presentation and for future work.
+**Nothing here is deployed.** This folder is real, validated Terraform
+(`terraform validate` passes, azurerm ~> 5.4) showing how MISO Copilot would
+run in production — for the presentation and for future work.
 
 ![Reference deployment](../docs/terraform-architecture.svg)
 
@@ -11,21 +10,33 @@ laptop-demo to production — for the presentation and for future work.
 
 ## What maps to what
 
-| Local (today) | Cloud (this file) |
+| Local (today) | Production (this file) |
 |---|---|
-| `uvicorn` on a laptop | Container App running the FastAPI image |
-| React dev server | Static Web App serving the built frontend |
-| `data/` folder on disk | Azure Files share mounted at `/app/data` |
-| `.env` with the API key | Key Vault secret, read via managed identity |
-| `/tmp/miso-backend.log` | Log Analytics workspace |
+| `uvicorn` on a laptop | `api` pods on AKS, N replicas behind a load balancer |
+| the poller inside the API process | its own single-replica workload — splitting it out is what lets the api scale |
+| in-memory answer cache + rate limiter | Redis — shared across all api replicas |
+| embedded Chroma reading local files | Chroma in client/server mode, one replica on a persistent volume |
+| nothing in front of the API | App Gateway with WAF: load balancing, OWASP rules, >60 req/min per IP blocked at the edge |
+| `data/` folder | Azure Files share (snapshots, request log, Chroma volume) |
+| `.env` with the API key | Key Vault secret, read via workload identity |
+| `/tmp/miso-backend.log` | Log Analytics, **forwarded to SIEM** (workspace onboarded) |
+| — | ACR for container images, built by CI |
+| — | MCP server as its own deployment, so other AI assistants can automate |
 
-## The one rule that carries over
+## Why AKS and not plain VMs
 
-The Container App is pinned to **exactly one replica** (`min_replicas =
-max_replicas = 1`). That's not a cost choice — the poller's rate guard is a
-local file and its scheduler must never run twice, same as the "one worker,
-one machine" rule in `AGENTS.md`. Scaling reads would mean splitting the
-poller into its own single-instance job first.
+Autoscaling (2–5 nodes), rolling deploys, and one scheduler for four
+distinct workloads (`api`, `poller`, `mcp`, `chroma`) beats hand-managing
+machines. The k8s manifests for those workloads would live in `k8s/` — this
+file is the platform underneath them.
+
+## The rules that carry over from the laptop
+
+- **One poller, ever.** The rate guard means exactly one thing talks to
+  MISO, at most once per link per minute — same rule as `AGENTS.md`, now
+  enforced by a single-replica deployment instead of a single laptop.
+- **Answers still say how fresh they are**, and the WAF is defense at the
+  edge while the app's own per-IP limiter stays as depth.
 
 ## If someone ever did apply this
 
@@ -36,6 +47,6 @@ terraform init
 terraform plan
 ```
 
-It would also need a CI job that builds the backend Docker image and pushes
-it to GHCR — that pipeline isn't set up, which is one more reason this
-folder is documentation, not a deployment.
+Still missing before it could really run: the k8s manifests, a CI job
+building images into ACR, and a TLS certificate on the gateway — all
+deliberately out of scope for a reference sketch.
