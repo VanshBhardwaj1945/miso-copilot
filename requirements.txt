@@ -5,8 +5,10 @@ uvicorn
 anthropic
 apscheduler
 
-# Coming with the RAG store (uncomment as they land):
-# llama-index
-# llama-index-vector-stores-chroma
-# llama-index-embeddings-huggingface
-# chromadb
+# RAG dependencies:
+llama-index
+llama-index-core
+llama-index-vector-stores-chroma
+llama-index-embeddings-huggingface
+chromadb
+sentence-transformers
