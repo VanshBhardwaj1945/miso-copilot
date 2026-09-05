@@ -5,7 +5,7 @@ import io
 import json
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 router = APIRouter()
@@ -35,6 +35,8 @@ def crosswalk_rows() -> list[dict]:
 @router.get("/crosswalk.csv")
 def crosswalk_csv():
     """The whole crosswalk as CSV; opens straight in Excel."""
+    if not CROSSWALK_PATH.exists():
+        raise HTTPException(404, "crosswalk.json has not been built - see backend/rag/README.md")
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=COLUMNS)
     writer.writeheader()

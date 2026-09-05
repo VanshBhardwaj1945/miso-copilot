@@ -118,7 +118,10 @@ JSON in front of an audience.
   disables the in-process scheduler only; the standalone commands above
   still run.
 
-All four are read after `.env` loading, so they can be set in `.env`.
+All four are read after `.env` loading, so they can be set in `.env`. One
+more, read by the API rather than the poller: `MISO_TRUST_PROXY=1` makes the
+per-IP rate limiter honor `X-Forwarded-For` - set it only behind a real
+reverse proxy, since anyone can send that header.
 
 Both path overrides are demo-day hazards: export one for a test, start the
 demo server from that shell an hour later, and the poller quietly does the

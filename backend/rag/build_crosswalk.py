@@ -42,9 +42,9 @@ FINAL_PATH = HERE / "crosswalk.json"
 # Public reconstructions of the two Data Exchange specs (api-evangelist). Drop
 # the official YAML from the portal into data/specs/ and these are ignored.
 SPEC_SOURCES = {
-    "pricing": "https://raw.githubusercontent.com/api-evangelist/miso/main/openapi/"
+    "pricing": "https://raw.githubusercontent.com/api-evangelist/miso/main/openapi/_original/"
                "miso-data-exchange-pricing-api-openapi.json",
-    "lgi": "https://raw.githubusercontent.com/api-evangelist/miso/main/openapi/"
+    "lgi": "https://raw.githubusercontent.com/api-evangelist/miso/main/openapi/_original/"
            "miso-data-exchange-load-generation-interchange-api-openapi.json",
 }
 
@@ -68,7 +68,9 @@ def fetch_specs() -> None:
         return
     for name, url in SPEC_SOURCES.items():
         response = requests.get(url, timeout=30)
-        response.raise_for_status()
+        if response.status_code != 200 or not response.content.lstrip().startswith(b"{"):
+            sys.exit(f"could not fetch the {name} spec ({response.status_code}) from {url}\n"
+                     f"download the OpenAPI JSON from data-exchange.misoenergy.org into {SPECS_DIR}")
         (SPECS_DIR / f"{name}.json").write_bytes(response.content)
         print(f"      fetched  data/specs/{name}.json")
         time.sleep(1)

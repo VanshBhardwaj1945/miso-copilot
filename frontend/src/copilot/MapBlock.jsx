@@ -35,10 +35,15 @@ export default function MapBlock({ spec }) {
     );
   }
 
-  // only real, in-footprint codes get highlighted - the prompt is told the
-  // list, but the drawing never trusts it
+  // only real, in-footprint states get highlighted - the prompt is told the
+  // list, but the drawing never trusts it. "Indiana" is accepted as well as "IN".
+  const byName = Object.fromEntries(
+    Object.entries(US_STATES).map(([code, { name }]) => [name.toLowerCase(), code]),
+  );
   const highlight = new Set(
-    cfg.highlight.map((c) => String(c).toUpperCase()).filter((c) => FOOTPRINT.includes(c)),
+    cfg.highlight
+      .map((c) => byName[String(c).trim().toLowerCase()] || String(c).trim().toUpperCase())
+      .filter((c) => FOOTPRINT.includes(c)),
   );
 
   return (

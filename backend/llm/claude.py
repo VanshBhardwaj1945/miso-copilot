@@ -55,6 +55,8 @@ def answer_question(question: str) -> tuple[str, list[dict]]:
         )
 
     answer = "".join(b.text for b in response.content if b.type == "text")
+    if response.stop_reason == "max_tokens":
+        answer += "\n\n*(answer cut short - ask a narrower question for the rest)*"
     if not sources:
         sources = [{"title": "misoenergy.org", "url": MISO_HOME_URL}]
 
