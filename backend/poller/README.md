@@ -9,6 +9,13 @@ It does not summarize, embed, chunk, or write to Chroma. The RAG lane
 of that. The seam between the two lanes is the filesystem, not a function
 call - either side can be rewritten, or run, without the other.
 
+One exception, and it is wiring rather than fetching: `schedule.run_cycle()`
+asks the RAG lane to re-read `data/raw/` once a cycle has finished, so Chroma
+follows the poller instead of freezing at boot-time data. It passes the
+directory, never the payloads, and the import is inside the function -
+`core.py` still knows nothing about Chroma, and `python -m backend.poller`
+still runs without the RAG dependencies installed.
+
 ## What it writes
 
 Into `data/raw/` (gitignored, never committed):

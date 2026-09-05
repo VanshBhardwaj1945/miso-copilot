@@ -12,6 +12,8 @@ when it is missing, which is why the executor below can be defined
 unconditionally here instead of behind an `if` at module scope.
 
 Entry points are poller_blocked(), start_scheduler() and stop_scheduler().
+The scheduled job itself is run_cycle(), which polls and then re-syncs the
+RAG store from the files the poll just wrote.
 """
 
 from __future__ import annotations
@@ -78,16 +80,54 @@ def poller_blocked() -> tuple[int, str] | None:
     return None
 
 
+def resync_rag() -> None:
+    """Re-read data/raw/ into Chroma so answers follow the poller.
+
+    The import is here rather than at module scope on purpose. This module
+    promises apscheduler is its only import-time dependency, and the RAG lane
+    drags in chromadb, torch and sentence-transformers - seconds of import
+    and a much larger blast radius for a missing package. main.py does the
+    same lazy import for the same reason.
+
+    The seam between the lanes stays the filesystem: the poller writes files
+    and this says "go re-read them", it never hands the RAG lane data.
+    """
+    from backend.rag.ingest_api import sync_raw_snapshots
+
+    # core.raw_dir(), not the RAG lane's default: MISO_RAW_DIR moves where the
+    # poll just wrote, and feeding Chroma from data/raw/ instead would quietly
+    # re-ingest stale snapshots every cycle while the status file looked fine.
+    results = sync_raw_snapshots(core.raw_dir())
+    synced = sum(1 for ok in results.values() if ok)
+    if synced == len(results):
+        log.info("Chroma re-synced from %d snapshot files", synced)
+    else:
+        missing = ", ".join(sorted(n for n, ok in results.items() if not ok))
+        log.warning("Chroma re-sync incomplete - %d of %d synced, missing: %s",
+                    synced, len(results), missing)
+
+
 def run_cycle() -> None:
-    """One poll cycle for the scheduler, which never raises out of it.
+    """One poll cycle and the Chroma re-sync, neither raising out of it.
 
     A cycle that threw would take the whole schedule down with it, so every
     failure stops here and the next cycle still fires.
+
+    The two steps get their own handler each. Sharing one would report a
+    Chroma failure as "poll cycle failed", which costs somebody an hour
+    chasing a network problem that was a database problem. The re-sync also
+    runs after a failed poll: data/raw/ still holds the last good files, and
+    the sync is idempotent, so a Chroma that started empty still fills.
     """
     try:
         core.poll_once()
     except Exception:
         log.exception("poll cycle failed, staying on schedule")
+
+    try:
+        resync_rag()
+    except Exception:
+        log.exception("Chroma re-sync failed, staying on schedule")
 
 
 def start_scheduler() -> BackgroundScheduler | None:

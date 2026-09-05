@@ -19,13 +19,19 @@ honestly in-process. That has been measured manually.
 """
 
 import logging
+import sys
 import threading
+import types
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from backend.poller import core
 from backend.poller import schedule
+
+# Captured before no_real_resync (autouse) replaces it, so the two tests that
+# exercise resync_rag itself can still reach the real one.
+REAL_RESYNC = schedule.resync_rag
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +44,22 @@ def no_real_cycles(monkeypatch):
         return {"endpoints": {}}
 
     monkeypatch.setattr(core, "poll_once", fake_poll_once)
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def no_real_resync(monkeypatch):
+    """Stub schedule.resync_rag for every test here. Yields the call log.
+
+    Autouse for the same reason no_real_cycles is. run_cycle re-syncs the RAG
+    store after every poll, and the real one imports chromadb and writes the
+    repo's own data/chroma - which conftest cannot redirect, because the
+    Chroma path is fixed in backend/rag/store.py rather than read from the
+    environment. start_scheduler fires a cycle immediately, so this catches
+    the scheduler tests too, not just the run_cycle ones.
+    """
+    calls = []
+    monkeypatch.setattr(schedule, "resync_rag", lambda: calls.append(1))
     return calls
 
 
@@ -205,6 +227,98 @@ def test_run_cycle_swallows_an_oserror_too(monkeypatch):
 
     monkeypatch.setattr(core, "poll_once", boom)
     assert schedule.run_cycle() is None
+
+
+def test_run_cycle_resyncs_the_rag_store_after_polling(no_real_resync):
+    # The whole point of the change: the poller refreshed data/raw/ every 5
+    # minutes while Chroma only ever synced at boot, so answers froze at
+    # boot-time data until someone restarted the server.
+    schedule.run_cycle()
+    assert len(no_real_resync) == 1
+
+
+def test_run_cycle_resyncs_even_when_the_poll_failed(monkeypatch,
+                                                     no_real_resync):
+    # data/raw/ still holds the last good files, and the sync is idempotent.
+    def boom():
+        raise RuntimeError("MISO is down")
+
+    monkeypatch.setattr(core, "poll_once", boom)
+    schedule.run_cycle()
+    assert len(no_real_resync) == 1
+
+
+def test_run_cycle_swallows_a_failing_resync(monkeypatch, no_real_cycles):
+    def boom():
+        raise RuntimeError("chroma is unhappy")
+
+    monkeypatch.setattr(schedule, "resync_rag", boom)
+    assert schedule.run_cycle() is None
+    assert len(no_real_cycles) == 1
+
+
+def test_a_failing_resync_is_not_reported_as_a_failed_poll(monkeypatch,
+                                                           caplog):
+    # Sharing one handler would blame the network for a database problem.
+    def boom():
+        raise RuntimeError("chroma is unhappy")
+
+    monkeypatch.setattr(schedule, "resync_rag", boom)
+    with caplog.at_level(logging.ERROR, logger=schedule.__name__):
+        schedule.run_cycle()
+    messages = [r.message for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("re-sync failed" in m for m in messages)
+    assert not any("poll cycle failed" in m for m in messages)
+
+
+# --- resync_rag -------------------------------------------------------------
+#
+# resync_rag imports backend.rag.ingest_api lazily, so these hand it a stub
+# module through sys.modules rather than importing the real RAG lane, which
+# would pull in chromadb and torch and write the repo's own data/chroma.
+
+def _stub_rag_lane(monkeypatch, results):
+    """Make the lazy `from backend.rag.ingest_api import ...` resolve to a stub."""
+    module = types.ModuleType("backend.rag.ingest_api")
+    module.calls = []
+
+    def sync_raw_snapshots(raw_dir=None):
+        module.calls.append(raw_dir)
+        return results
+
+    module.sync_raw_snapshots = sync_raw_snapshots
+    monkeypatch.setitem(sys.modules, "backend.rag.ingest_api", module)
+    return module
+
+
+def test_resync_rag_reports_a_complete_sync_at_info(monkeypatch, caplog):
+    _stub_rag_lane(monkeypatch, {"FuelMix.json": True, "Snapshot.json": True})
+    with caplog.at_level(logging.INFO, logger=schedule.__name__):
+        REAL_RESYNC()
+    rendered = [r.getMessage() for r in caplog.records]
+    assert any("re-synced from 2 snapshot files" in m for m in rendered)
+
+
+def test_resync_rag_names_the_files_that_did_not_sync(monkeypatch, caplog):
+    # Silence here means nobody can tell "synced fine" from "never ran".
+    _stub_rag_lane(monkeypatch, {"FuelMix.json": True, "Snapshot.json": False})
+    with caplog.at_level(logging.WARNING, logger=schedule.__name__):
+        REAL_RESYNC()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings
+    rendered = warnings[0].getMessage()
+    assert "1 of 2" in rendered
+    assert "Snapshot.json" in rendered
+
+
+def test_resync_rag_reads_the_directory_the_poller_wrote(monkeypatch, raw):
+    # MISO_RAW_DIR moves the poller's output. Ingesting the default data/raw/
+    # instead would re-feed Chroma stale snapshots every cycle while
+    # _status.json looked healthy - one of the demo-day hazards the poller
+    # README names.
+    module = _stub_rag_lane(monkeypatch, {"FuelMix.json": True})
+    REAL_RESYNC()
+    assert module.calls == [raw]
 
 
 # --- start_scheduler --------------------------------------------------------

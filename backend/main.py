@@ -32,8 +32,9 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Update Chroma from data/raw/ immediately on boot
     try:
+        from backend.poller.core import raw_dir
         from backend.rag.ingest_api import sync_raw_snapshots
-        sync_raw_snapshots()
+        sync_raw_snapshots(raw_dir())
     except Exception as err:
         log.warning("Initial RAG snapshot sync skipped: %s", err)
 
