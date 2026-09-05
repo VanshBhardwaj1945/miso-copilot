@@ -11,4 +11,11 @@ llama-index-core
 llama-index-vector-stores-chroma
 llama-index-embeddings-huggingface
 chromadb
-sentence-transformers
+sentence-transformers<5
+transformers<5
+# Intel Macs: torch stopped publishing wheels for this platform after 2.2.2,
+# and sentence-transformers>=5 / transformers>=5 require torch>=2.5, which
+# has no wheel here - pinned below torch 2.2.2's ceiling. numpy<2 matches
+# torch 2.2.2's build ABI (numpy 2.x raises "_ARRAY_API not found").
+# Skip both pins on Apple Silicon or Linux, where newer torch wheels exist.
+numpy<2

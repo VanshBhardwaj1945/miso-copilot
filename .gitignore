@@ -1,4 +1,4 @@
-# secrets — never commit API keys
+# secrets 
 .env
 
 # python
@@ -17,6 +17,15 @@ chroma_db/
 .DS_Store
 .idea/
 .vscode/
+
+# personal notes — never part of the product
+learn.md
+
+# local debug artifacts
+.playwright-mcp/
+/react-5173.png
+/streamlit-8501.png
+/streamlit-check.png
 
 # coverage artifacts
 .coverage
