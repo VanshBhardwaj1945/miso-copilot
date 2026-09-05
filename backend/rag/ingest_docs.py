@@ -1,4 +1,7 @@
-"""One-time doc ingestion: put files in data/docs/, run python -m backend.rag.ingest_docs."""
+"""One-time doc ingestion: put files in data/docs/, run python -m backend.rag.ingest_docs.
+
+Being built out on the feature/doc-lane branch: curated MISO corpus + real citation URLs.
+"""
 
 from pathlib import Path
 from llama_index.core import SimpleDirectoryReader
