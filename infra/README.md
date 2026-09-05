@@ -23,6 +23,23 @@ run in production — for the presentation and for future work.
 | — | ACR for container images, built by CI |
 | — | MCP server as its own deployment, so other AI assistants can automate |
 
+## File layout
+
+```
+versions.tf        # terraform + provider pins
+variables.tf       # prefix, region, API key (sensitive)
+main.tf            # resource group
+network.tf         # vnet, subnets, public IP
+edge.tf            # WAF policy (firewall + per-IP rate limit) + App Gateway
+cluster.tf         # AKS + the four workloads it runs
+registry.tf        # ACR + the cluster's pull permission
+storage.tf         # Redis (cache + rate-limit state) + Azure Files
+secrets.tf         # Key Vault + workload identity
+observability.tf   # Log Analytics, forwarded to SIEM
+frontend.tf        # Static Web App
+outputs.tf         # public entrypoint + frontend hostname
+```
+
 ## Why AKS and not plain VMs
 
 Autoscaling (2–5 nodes), rolling deploys, and one scheduler for four
