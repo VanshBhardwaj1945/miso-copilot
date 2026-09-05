@@ -154,6 +154,8 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - The Anthropic API key lives in `.env` (gitignored). **Never commit keys**, never
   print them in logs or error messages.
 - `data/` and `chroma_db/` are local stores - gitignored, never commit.
+- `/ask` logs every request (ip, question, outcome, ms) to `data/logs/requests.jsonl`
+  and rate-limits each IP to 20/min - see `backend/security.py`.
 
 ## Conventions
 

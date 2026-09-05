@@ -1,12 +1,14 @@
 """/ask and /health endpoints."""
 
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import anthropic
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend import security
 from backend.llm import claude
 
 router = APIRouter()
@@ -18,13 +20,21 @@ class AskRequest(BaseModel):
 
 
 @router.post("/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, request: Request):
     """Answer one question via Claude; maps API failures to clean HTTP errors."""
+    ip = security.client_ip(request)
+    if not security.allow(ip):
+        security.log_request(ip, req.question, "rate_limited", 0)
+        raise HTTPException(429, "Too many requests - please slow down a little")
+
     if claude.client is None:
         raise HTTPException(503, "CLAUDE_API_KEY is not configured")
 
+    started = time.perf_counter()
+    outcome = "failed"
     try:
         answer, sources = claude.answer_question(req.question)
+        outcome = "answered"
     except anthropic.AuthenticationError:
         raise HTTPException(503, "Claude API key is invalid")
     except anthropic.RateLimitError:
@@ -33,6 +43,9 @@ def ask(req: AskRequest):
         raise HTTPException(502, f"Claude API error ({e.status_code})")
     except anthropic.APIConnectionError:
         raise HTTPException(502, "Could not reach the Claude API")
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        security.log_request(ip, req.question, outcome, elapsed_ms)
 
     # Fixed EST, not a DST-observing zone. MISO publishes every timestamp in
     # fixed EST year-round - its own Snapshot feed stamped "5:25:00 PM EST"
