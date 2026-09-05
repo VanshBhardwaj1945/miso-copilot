@@ -93,11 +93,25 @@ For contributor rules and the full architecture constraints, see
 
 ## Maybe / later
 
-- **Answer caching** - answers can't change between poll cycles, so repeated questions
-  could skip the Claude call. Not built yet.
-- **Auto-refresh the vector DB after each poll** - today it syncs at boot.
-- **Document search** - the machinery for "where do I find X report?" is built and
-  waiting on a curated set of MISO documents in `data/docs/`.
+- **Answer caching** - answers can't change between poll cycles, so repeated
+  questions could skip the Claude call.
+  - holds recent question &rarr; answer pairs in memory
+  - checks the cache before calling Claude
+  - clears itself whenever the poller brings fresh data
+- **Auto-refresh the vector DB after each poll** - today it only syncs at boot.
+  - poller finishes a cycle &rarr; calls the same sync that runs at startup
+  - one line in the poller, no new pieces
+- **Document search** - the machinery for "where do I find X report?" is built
+  and waiting on documents.
+  - put MISO PDFs / key pages into `data/docs/`
+  - run `ingest_docs.py` once - it chunks and stores them in Chroma
+  - answers can then point people at the exact right report
+- **MCP server** - let other people's AI assistants automate on our data.
+  - a small server that speaks MCP (the open standard AI tools use)
+  - exposes tools like `get_fuel_mix()` and `search_miso(question)`
+  - reads our local snapshots only - never hits MISO's API directly, so
+    anyone can automate freely and MISO sees zero extra traffic
+  - connects to Claude Desktop / Claude Code / Cursor out of the box
 
 ## Team
 
