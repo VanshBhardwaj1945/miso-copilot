@@ -14,14 +14,16 @@ flowchart LR
         MISOAPI --> RAW[("data/raw/*.json - verbatim<br/>+ _status.json")]
     end
 
-    subgraph RAGLANE["RAG LANE - separate workstream"]
+    subgraph RAGLANE["RAG LANE - reads the poller's files"]
         SUMM["JSON → plain-English snapshot<br/>('As of 6:55 PM...')"]
     end
 
     subgraph ASK["QUESTION TIME"]
-        USER(["User"]) --> UI["Chat UI<br/>(Streamlit)"]
-        UI --> API["FastAPI backend<br/>(GitHub repo)"]
+        USER(["User"]) --> UI["Chat UI<br/>(React widget; Streamlit backup)"]
+        UI --> API["FastAPI backend<br/>(/ask)"]
         API --> CLAUDE["Claude (Opus 5)<br/>answers w/ retrieved ctx"]
+        CACHE["(maybe, later)<br/>answer cache for repeated<br/>questions - saves Claude calls"]:::maybe
+        API -.-> CACHE
     end
 
     subgraph INGEST["ONE-TIME DOC INGESTION"]
@@ -42,6 +44,7 @@ flowchart LR
 
     classDef note fill:#fff9db,stroke:#f08c00,color:#1e1e1e
     classDef rule fill:#ffc9c9,stroke:#e03131,color:#1e1e1e
+    classDef maybe fill:#f1f3f5,stroke:#adb5bd,color:#495057,stroke-dasharray: 5 5
     class N2,N3,N4 note
     class N1 rule
 ```
@@ -151,10 +154,13 @@ streamlit run app.py
 
 The React dev server proxies `/ask` to `localhost:8000` (no CORS setup needed).
 Without a key the backend returns 503 and the widget shows a graceful handoff to
-MISO's contact form. The current backend sends every question straight to Claude
-(Opus 5) with a MISO system prompt; the 5-min poller now writes verbatim MISO
-JSON into `data/raw/`, and the RAG store (Chroma + LlamaIndex) that reads those
-files lands next.
+MISO's contact form. The full pipeline is live: at boot the backend syncs
+`data/raw/` into Chroma and starts the 5-min poller; each question retrieves the
+top matching snapshots and Claude (Opus 5) answers from that context with an
+"as of \<time\>" stamp and source links. Set `FORCE_MOCK = True` in
+`backend/llm/claude.py` to skip Claude and see the raw retrieved context instead
+(free, useful for testing retrieval). Python 3.11 recommended - see the platform
+notes pinned in `requirements.txt`.
 
 Answers are markdown and both UIs render it: bold/tables/lists, inline links,
 code blocks, LaTeX math (KaTeX, real symbols and fractions), and charts - the
@@ -172,11 +178,11 @@ backend/                      # FastAPI app
   config.py                   #   .env loading, model + URL constants
   routes/                     #   /ask and /health endpoints
   llm/                        #   Claude client + system prompt
-  rag/                        #   (planned) Chroma + LlamaIndex retrieval
+  rag/                        #   Chroma + LlamaIndex: transformers, ingest, retriever
   poller/                     #   5-min poller: verbatim MISO JSON into data/raw/
 app.py                        # Streamlit chat UI (fallback; talks to the same backend)
 docs/                         # architecture diagram: arch-v1.png + .excalidraw source
-ingest/                       # (planned) one-time LlamaIndex document ingestion
+tests/                        # poller test suite (627 tests, 100% branch coverage)
 data/                         # Chroma persistence, data/raw/ (poller output),
                               #   data/raw.backup/ (demo fallback) - gitignored
 ```
@@ -184,6 +190,18 @@ data/                         # Chroma persistence, data/raw/ (poller output),
 A full rendering of the architecture lives in [`docs/arch-v1.png`](docs/arch-v1.png);
 to edit it, drag [`docs/architecture.excalidraw`](docs/architecture.excalidraw) into
 [excalidraw.com](https://excalidraw.com).
+
+## Maybe / later
+
+Ideas we're considering but haven't built:
+
+- **Answer caching for Claude calls** - repeated questions ("what's the fuel mix?")
+  could serve a cached answer until the next poll cycle instead of a fresh Claude
+  call. Not implemented yet; there is no caching anywhere in the pipeline today.
+- **Re-sync Chroma after each poll cycle** - today the vector store only syncs at
+  server boot (see `backend/rag/README.md`).
+- **Feed the document lane** - `data/docs/` is empty; the Fact Sheet + key report
+  pages need one polite fetch and an `ingest_docs.py` run.
 
 ## Team
 

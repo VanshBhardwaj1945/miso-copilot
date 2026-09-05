@@ -8,7 +8,7 @@ Layout:
   config.py   env/.env loading, model + URL constants
   routes/     HTTP endpoints (/ask, /health)
   llm/        Claude client + system prompt
-  rag/        (planned) Chroma + LlamaIndex retrieval
+  rag/        Chroma + LlamaIndex: JSON->prose, upsert, retrieval
   poller/     fetches four MISO endpoints every 5 min and writes their
               JSON verbatim to data/raw/; poller/schedule.py is the
               APScheduler wiring this file starts at boot

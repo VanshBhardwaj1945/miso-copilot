@@ -24,13 +24,12 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   config.py                 #   .env loading, model + URL constants
   routes/                   #   /ask and /health endpoints
   llm/                      #   Claude client + system prompt
-  rag/                      #   (planned) Chroma + LlamaIndex retrieval - see its README
+  rag/                      #   Chroma + LlamaIndex: transformers, ingest, retriever
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
 tests/                      # pytest suite for backend/poller/, plus the MISO stub
 docs/                       # architecture diagram (arch-v1.png + .excalidraw source)
-ingest/                     # (planned) one-time LlamaIndex document ingestion
 data/                       # gitignored, never commit. Chroma persistence, plus
                             #   data/raw/ (poller output) and data/raw.backup/
                             #   (demo fallback)
@@ -165,7 +164,7 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - Docstrings state what a module does and what's stubbed/pending (see `app.py`).
 - If you change the architecture picture, update both `docs/architecture.excalidraw`
   (source) and `docs/arch-v1.png` (render), plus the mermaid diagram in `README.md`.
-- Update `README.md` when planned pieces (backend/, ingest/) become real.
+- Update `README.md` when the remaining planned pieces (doc corpus in data/docs/, poller-to-Chroma resync) become real.
 - Tests live in `tests/`, named for the behavior they protect rather than the
   function they call. Where a test exists because of a bug that actually
   happened, say so in a line above it - that is what stops someone deleting it
