@@ -87,7 +87,8 @@ backend/
   poller/          #   5-min poller with a hard rate guard
 app.py             # Streamlit backup UI
 tests/             # poller test suite
-docs/              # architecture diagrams (simple + detailed)
+docs/              # architecture diagrams (simple + detailed + cloud reference)
+infra/             # Terraform sketch of a future cloud deployment - reference only
 data/              # local data + vector store (gitignored)
 ```
 

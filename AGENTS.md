@@ -30,7 +30,10 @@ app.py                      # Streamlit chat UI (testing/backup ONLY - never the
                             #   independent of frontend/ by design, do not merge them)
 tests/                      # pytest suite for backend/poller/, plus the MISO stub
 docs/                       # architecture diagrams: architecture.svg (README) +
-                            #   architecture-detailed.svg/.png (full version)
+                            #   architecture-detailed.svg/.png (full version) +
+                            #   terraform-architecture.svg/.png (cloud reference)
+infra/                      # validated Terraform sketch of a future cloud
+                            #   deployment - reference only, never applied
 data/                       # gitignored, never commit. Chroma persistence, plus
                             #   data/raw/ (poller output) and data/raw.backup/
                             #   (demo fallback)
