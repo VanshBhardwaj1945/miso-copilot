@@ -1,0 +1,932 @@
+{
+  "note": "Report-to-API crosswalk. Drafted by Claude from the readers' guides and the Data Exchange spec, every field checked against the spec, reviewed by a human.",
+  "spec_files": [
+    "miso-data-exchange-load-generation-interchange-api-openapi.json",
+    "miso-data-exchange-pricing-api-openapi.json"
+  ],
+  "entries": [
+    {
+      "report": "Annual Real Time LMP 5-Min",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "timeResolution": "5min",
+        "preliminaryFinal": "Final"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "date now the path param; echoed in interval start"
+        },
+        {
+          "old": "INTERVALEST",
+          "new": "timeInterval.start",
+          "note": "5-minute interval start timestamp"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": "row label becomes its own field"
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": "congestion component"
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": "loss component"
+        }
+      ],
+      "shape": "The annual zip of 5-minute rows becomes per-date API calls where the LMP/MCC/MLC 'Value' row labels become sibling fields on one record per node per interval.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day Ahead Market ExAnte LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/lmp-exante",
+      "params": {
+        "date": "<YYYY-MM-DD>"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "interval",
+          "note": "hour index expressed as interval identifier"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to one row per hour, and the LMP/MCC/MLC 'Value' rows collapse into three fields on that row; the CSV 'Type' (node type) has no field here.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day Ahead Market ExAnte MCPs",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/asm-exante",
+      "params": {
+        "date": "<YYYY-MM-DD>"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "zone",
+          "note": "reserve zone / MISO-wide identifier"
+        },
+        {
+          "old": "Type",
+          "new": "product",
+          "note": "Reg/Spin/Supp product code"
+        },
+        {
+          "old": "Value",
+          "new": "mcp",
+          "note": "clearing price value"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "interval",
+          "note": "hour index expressed as interval identifier"
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to one row per zone, product and hour with a single mcp value.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day Ahead Market ExPost LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "interval",
+          "note": "hour index expressed as interval identifier"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to hourly rows and the price-component 'Value' rows become lmp/mcc/mlc fields.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day Ahead Market ExPost MCPs",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/asm-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "zone",
+          "note": "reserve zone / MISO-wide identifier"
+        },
+        {
+          "old": "Type",
+          "new": "product",
+          "note": "Reg/Spin/Supp product code"
+        },
+        {
+          "old": "Value",
+          "new": "mcp",
+          "note": "clearing price value"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "interval",
+          "note": "hour index expressed as interval identifier"
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to one row per zone, product and hour with a single mcp value.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Historical Annual Day Ahead LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "quarterly archive replaced by per-day calls"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        }
+      ],
+      "shape": "The quarterly multi-day archive becomes date-by-date requests, with HE columns unpivoted to hourly rows and 'Value' rows folded into lmp/mcc/mlc fields.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Historical Annual Real Time LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "timeResolution": "hourly",
+        "preliminaryFinal": "Final"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "quarterly archive replaced by per-day calls"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        }
+      ],
+      "shape": "The quarterly archive becomes per-date hourly-resolution queries, with HE columns unpivoted and component rows folded into fields.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Real Time Final Market LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "preliminaryFinal": "Final",
+        "timeResolution": "hourly"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": "hourly integrated ex post LMP"
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        },
+        {
+          "old": "final vs preliminary file distinction",
+          "new": "preliminaryFinal",
+          "note": "file identity now a filter/field"
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to hourly rows, 'Value' component rows become fields, and the separate final file becomes preliminaryFinal=Final.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Real Time Preliminary Market LMPs",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "preliminaryFinal": "Preliminary",
+        "timeResolution": "hourly"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        },
+        {
+          "old": "final vs preliminary file distinction",
+          "new": "preliminaryFinal",
+          "note": "file identity now a filter/field"
+        }
+      ],
+      "shape": "Same unpivot of HE columns and 'Value' rows, with the preliminary file selected by preliminaryFinal=Preliminary.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Weekly Real Time 5-Min LMP",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/lmp-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "timeResolution": "5min"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "weekly file replaced by per-day calls"
+        },
+        {
+          "old": "INTERVALEST",
+          "new": "timeInterval.start",
+          "note": "5-minute interval start timestamp"
+        },
+        {
+          "old": "Node",
+          "new": "node",
+          "note": "pnode name"
+        },
+        {
+          "old": "Value = LMP",
+          "new": "lmp",
+          "note": ""
+        },
+        {
+          "old": "Value = MCC",
+          "new": "mcc",
+          "note": ""
+        },
+        {
+          "old": "Value = MLC",
+          "new": "mlc",
+          "note": ""
+        }
+      ],
+      "shape": "The week-long accumulation becomes seven per-date requests at 5-minute resolution, with component rows collapsed into lmp/mcc/mlc fields.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Real Time Final Market MCPs",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/asm-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "preliminaryFinal": "Final",
+        "timeResolution": "hourly"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "zone",
+          "note": "reserve zone / MISO-wide identifier"
+        },
+        {
+          "old": "Type",
+          "new": "product",
+          "note": "Reg/Spin/Supp product code"
+        },
+        {
+          "old": "Value",
+          "new": "mcp",
+          "note": "clearing price value"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "final vs preliminary file distinction",
+          "new": "preliminaryFinal",
+          "note": "file identity now a filter/field"
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to one hourly row per zone and product with a single mcp value, and the final file is selected by preliminaryFinal=Final.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Real Time Preliminary Market MCPs",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/asm-expost",
+      "params": {
+        "date": "<YYYY-MM-DD>",
+        "preliminaryFinal": "Preliminary",
+        "timeResolution": "hourly"
+      },
+      "fields": [
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "market day is the path param"
+        },
+        {
+          "old": "Node",
+          "new": "zone",
+          "note": "reserve zone / MISO-wide identifier"
+        },
+        {
+          "old": "Type",
+          "new": "product",
+          "note": "Reg/Spin/Supp product code"
+        },
+        {
+          "old": "Value",
+          "new": "mcp",
+          "note": "clearing price value"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "hour-ending column becomes one record per hour"
+        },
+        {
+          "old": "final vs preliminary file distinction",
+          "new": "preliminaryFinal",
+          "note": "file identity now a filter/field"
+        }
+      ],
+      "shape": "Wide HE 1..HE 24 columns unpivot to one hourly row per zone and product, with the preliminary file selected by preliminaryFinal=Preliminary.",
+      "guide": "readers-guide-real-time-final-lmps.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day-Ahead Pricing Report (Demand Pricing Results section)",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/demand",
+      "params": {
+        "date": "<market date>",
+        "region": "MISO",
+        "timeResolution": "hourly"
+      },
+      "fields": [
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending row becomes interval start/end"
+        },
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.end",
+          "note": "hour ending timestamp"
+        },
+        {
+          "old": "Energy Cleared (MWh) - Fixed",
+          "new": "fixed",
+          "note": "cleared demand from fixed bids"
+        },
+        {
+          "old": "Energy Cleared (MWh) - Price Sensitive",
+          "new": "priceSens",
+          "note": "cleared demand from price sensitive bids"
+        },
+        {
+          "old": "Energy Cleared (MWh) - Virtual",
+          "new": "virtual",
+          "note": "cleared demand from virtual bids"
+        }
+      ],
+      "shape": "Hourly rows (Hour 01-24) become one record per timeInterval; Energy Cleared Total and all Dollars Cleared columns have no API field and must be derived or dropped.",
+      "guide": "readers-guide-day-ahead-pricing.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Day-Ahead%20Pricing_Day-Ahead%20Pricing%20Report%20Readers%20Guide.pdf",
+      "api": "lgi",
+      "base_url": "https://apim.misoenergy.org/lgi",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day-Ahead Pricing Report (Supply Pricing Results section, physical)",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/generation/cleared/physical",
+      "params": {
+        "date": "<market date>",
+        "region": "MISO"
+      },
+      "fields": [
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending row becomes interval start"
+        },
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.end",
+          "note": "hour ending timestamp"
+        },
+        {
+          "old": "Energy Cleared (MWh) - Physical",
+          "new": "supply",
+          "note": "cleared supply from physical offers"
+        }
+      ],
+      "shape": "Hourly rows become one record per timeInterval; the Physical column collapses into the single 'supply' field of this endpoint, and Dollars Cleared - Physical has no equivalent.",
+      "guide": "readers-guide-day-ahead-pricing.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Day-Ahead%20Pricing_Day-Ahead%20Pricing%20Report%20Readers%20Guide.pdf",
+      "api": "lgi",
+      "base_url": "https://apim.misoenergy.org/lgi",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day-Ahead Pricing Report (Supply Pricing Results section, virtual)",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/generation/cleared/virtual",
+      "params": {
+        "date": "<market date>",
+        "region": "MISO"
+      },
+      "fields": [
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending row becomes interval start"
+        },
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.end",
+          "note": "hour ending timestamp"
+        },
+        {
+          "old": "Energy Cleared (MWh) - Virtual",
+          "new": "supply",
+          "note": "cleared supply from virtual offers"
+        }
+      ],
+      "shape": "Hourly rows become one record per timeInterval; Energy Cleared Total must be summed from the physical and virtual endpoints, and Dollars Cleared columns are unavailable.",
+      "guide": "readers-guide-day-ahead-pricing.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Day-Ahead%20Pricing_Day-Ahead%20Pricing%20Report%20Readers%20Guide.pdf",
+      "api": "lgi",
+      "base_url": "https://apim.misoenergy.org/lgi",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day-Ahead Pricing Report (LMP Prices ($ per MW) section)",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/lmp-expost",
+      "params": {
+        "date": "<market date>",
+        "node": "<hub name, one call per hub, e.g. ILLINOIS.HUB>"
+      },
+      "fields": [
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending row becomes interval start"
+        },
+        {
+          "old": "Hour 01 - Hour 24",
+          "new": "interval",
+          "note": "hourly interval identifier"
+        },
+        {
+          "old": "Illinois Hub",
+          "new": "lmp",
+          "note": "select with node=Illinois Hub"
+        },
+        {
+          "old": "Michigan Hub",
+          "new": "lmp",
+          "note": "select with node=Michigan Hub"
+        },
+        {
+          "old": "Minnesota Hub",
+          "new": "lmp",
+          "note": "select with node=Minnesota Hub"
+        },
+        {
+          "old": "Indiana Hub",
+          "new": "lmp",
+          "note": "select with node=Indiana Hub"
+        },
+        {
+          "old": "Arkansas Hub",
+          "new": "lmp",
+          "note": "select with node=Arkansas Hub"
+        },
+        {
+          "old": "Louisiana Hub",
+          "new": "lmp",
+          "note": "select with node=Louisiana Hub"
+        },
+        {
+          "old": "Texas Hub",
+          "new": "lmp",
+          "note": "select with node=Texas Hub"
+        },
+        {
+          "old": "Illinois Hub",
+          "new": "node",
+          "note": "hub column header becomes a node value"
+        }
+      ],
+      "shape": "Wide hub columns by hour become long rows keyed on node + timeInterval with lmp as the value; MISO System column and the Around the Clock / On-Peak / Off-Peak Low, Average, High summary rows have no API field and must be computed from the hourly lmp values.",
+      "guide": "readers-guide-day-ahead-pricing.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Day-Ahead%20Pricing_Day-Ahead%20Pricing%20Report%20Readers%20Guide.pdf",
+      "api": "pricing",
+      "base_url": "https://apim.misoenergy.org/pricing",
+      "status": "reviewed"
+    },
+    {
+      "report": "Real-Time State Estimator Generation Fuel Mix",
+      "old_file": "",
+      "endpoint": "GET /v1/real-time/{date}/generation/fuel-type",
+      "params": {
+        "date": "<prior market day, YYYY-MM-DD>",
+        "region": "NORTH | CENTRAL | SOUTH | MISO (one call per region, omit for all)"
+      },
+      "fields": [
+        {
+          "old": "North / Central / South / MISO (column group headers)",
+          "new": "region",
+          "note": "region becomes a field/param instead of column blocks"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending columns become one row per interval"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "interval end bound of the hour"
+        },
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "date carried in the interval timestamp / date path param"
+        },
+        {
+          "old": "COAL",
+          "new": "fuelTypes.coal",
+          "note": "MW from coal"
+        },
+        {
+          "old": "GAS",
+          "new": "fuelTypes.gas",
+          "note": "MW from gas"
+        },
+        {
+          "old": "HYDRO",
+          "new": "fuelTypes.water",
+          "note": "hydro renamed water"
+        },
+        {
+          "old": "NUCLEAR",
+          "new": "fuelTypes.nuclear",
+          "note": ""
+        },
+        {
+          "old": "WIND",
+          "new": "fuelTypes.wind",
+          "note": ""
+        },
+        {
+          "old": "SOLAR",
+          "new": "fuelTypes.solar",
+          "note": "added in guide v2.0"
+        },
+        {
+          "old": "OTHER",
+          "new": "fuelTypes.other",
+          "note": "residual fuels other than storage"
+        },
+        {
+          "old": "OTHER (Battery portion)",
+          "new": "fuelTypes.storage",
+          "note": "battery split out of Other in the API"
+        },
+        {
+          "old": "Total MW",
+          "new": "totalMw",
+          "note": "per region total"
+        }
+      ],
+      "shape": "Wide hourly grid (fuel-type rows x HE 1..HE 24 columns, repeated per region block) becomes long JSON rows keyed by timeInterval and region with each fuel type as a named field under fuelTypes.",
+      "guide": "readers-guide-generation-fuel-mix.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Generation%20Fuel%20Mix%20Readers%20Guide.pdf",
+      "api": "lgi",
+      "base_url": "https://apim.misoenergy.org/lgi",
+      "status": "reviewed"
+    },
+    {
+      "report": "Day-Ahead Cleared Generation Fuel Mix",
+      "old_file": "",
+      "endpoint": "GET /v1/day-ahead/{date}/generation/fuel-type",
+      "params": {
+        "date": "<prior market day, YYYY-MM-DD>",
+        "region": "NORTH | CENTRAL | SOUTH | MISO (one call per region, omit for all)"
+      },
+      "fields": [
+        {
+          "old": "North / Central / South / MISO (column group headers)",
+          "new": "region",
+          "note": "region becomes a field/param instead of column blocks"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.start",
+          "note": "hour-ending columns become one row per interval"
+        },
+        {
+          "old": "HE 1..HE 24",
+          "new": "timeInterval.end",
+          "note": "interval end bound of the hour"
+        },
+        {
+          "old": "MARKET_DAY",
+          "new": "timeInterval.start",
+          "note": "date carried in the interval timestamp / date path param"
+        },
+        {
+          "old": "COAL",
+          "new": "fuelTypes.coal",
+          "note": "DA cleared MW from coal"
+        },
+        {
+          "old": "GAS",
+          "new": "fuelTypes.gas",
+          "note": ""
+        },
+        {
+          "old": "HYDRO",
+          "new": "fuelTypes.water",
+          "note": "hydro renamed water"
+        },
+        {
+          "old": "NUCLEAR",
+          "new": "fuelTypes.nuclear",
+          "note": ""
+        },
+        {
+          "old": "WIND",
+          "new": "fuelTypes.wind",
+          "note": ""
+        },
+        {
+          "old": "SOLAR",
+          "new": "fuelTypes.solar",
+          "note": "added in guide v2.0"
+        },
+        {
+          "old": "OTHER",
+          "new": "fuelTypes.other",
+          "note": "residual fuels other than storage"
+        },
+        {
+          "old": "OTHER (Battery portion)",
+          "new": "fuelTypes.storage",
+          "note": "battery split out of Other in the API"
+        },
+        {
+          "old": "Total MW",
+          "new": "totalMw",
+          "note": "per region total"
+        }
+      ],
+      "shape": "The DA cleared section's wide per-region hourly grid is flattened to one JSON record per region per hourly timeInterval, with fuel types as fields rather than rows.",
+      "guide": "readers-guide-generation-fuel-mix.pdf",
+      "report_url": "https://docs.misoenergy.org/marketreports/Generation%20Fuel%20Mix%20Readers%20Guide.pdf",
+      "api": "lgi",
+      "base_url": "https://apim.misoenergy.org/lgi",
+      "status": "reviewed"
+    }
+  ]
+}

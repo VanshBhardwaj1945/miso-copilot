@@ -13,8 +13,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Matches the ```chart fenced JSON blocks the backend puts in answers.
-CHART_BLOCK = re.compile(r"```chart\s*\n(.*?)```", re.DOTALL)
+# Matches the ```chart and ```map fenced JSON blocks the backend puts in answers.
+CHART_BLOCK = re.compile(r"```(chart|map)\s*\n(.*?)```", re.DOTALL)
 
 BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "http://localhost:8000")
 CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
@@ -24,7 +24,7 @@ SAMPLE_QUESTIONS = [
     "What's the current fuel mix?",
     "Where can I find historical LMP (price) data?",
     "How does the generator interconnection queue work?",
-    "What is MISO's latest seasonal reliability assessment?",
+    "The RT LMP CSV had an MLC column - where is it in the Data Exchange API?",
 ]
 
 st.set_page_config(page_title="MISO Copilot", layout="centered")
@@ -49,6 +49,18 @@ with st.sidebar:
 
 st.title("MISO Copilot")
 st.caption("The front door to MISO's public data. Ask in plain English.")
+
+
+def render_map(spec_json: str) -> None:
+    """The React widget draws a map; here a caption names the highlighted states."""
+    try:
+        cfg = json.loads(spec_json)
+        states = ", ".join(str(s) for s in cfg["highlight"])
+    except (KeyError, ValueError, TypeError):
+        st.code(spec_json, language="json")
+        return
+    st.caption(f"Map: {cfg.get('title', 'MISO footprint')} - {states} "
+               "(MISO serves all or part of each, plus Manitoba)")
 
 
 def render_chart(spec_json: str) -> None:
@@ -84,7 +96,10 @@ def render_answer(markdown_text: str) -> None:
         text_before_chart = markdown_text[pos : match.start()]
         if text_before_chart.strip():
             st.markdown(text_before_chart)
-        render_chart(match.group(1))
+        if match.group(1) == "map":
+            render_map(match.group(2))
+        else:
+            render_chart(match.group(2))
         pos = match.end()
 
     text_after_last_chart = markdown_text[pos:]
@@ -111,6 +126,8 @@ def get_answer(question: str) -> str:
         parts.append(f"*as of {data['as_of']}*")
     for s in data.get("sources", []):
         parts.append(f"Source: [{s.get('title', s['url'])}]({s['url']})")
+    if "apim.misoenergy.org" in data["answer"]:   # a crosswalk answer
+        parts.append(f"[Download the full crosswalk (CSV)]({BACKEND_URL}/crosswalk.csv)")
     return "\n\n".join(parts)
 
 

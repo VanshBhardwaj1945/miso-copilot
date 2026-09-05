@@ -53,6 +53,9 @@ those teams actually receive, roughly:
    auctions, planning (utilities, market participants)
 4. **"What's MISO's position or filing?"** — regulatory filings,
    reliability assessments (regulators, media)
+5. **"Where did my column go?"** — MISO is moving its market reports from
+   CSV downloads to the Data Exchange API (Sept 30), and a MISO mentor named
+   the missing old-report-to-new-API crosswalk as an unsolved pain point
 
 Our answer to the prompt — a chat assistant over MISO's own public data,
 with sources and freshness on every answer — is described in the

@@ -18,7 +18,10 @@ utility analysts emails MISO's human teams instead.
 **MISO Copilot deflects those routine questions**: ask in plain English, get an answer
 with a source link, sourced from MISO's own public data. Live questions ("how much wind
 right now?") are answered from MISO's APIs; "where do I find X?" questions are answered
-from a small curated set of MISO's own documents - and the link is the answer.
+from a small curated set of MISO's own documents - and the link is the answer. And
+because MISO is retiring its CSV market reports in favor of the Data Exchange API on
+Sept 30 with no published mapping between the two, the copilot carries a **report-to-API
+crosswalk**: ask "where did the MLC column go?" and it names the endpoint and the field.
 
 ## How it works
 
@@ -49,6 +52,7 @@ Everything runs locally and free, except Claude API calls (pennies).
 | LLM | Claude (Anthropic API) |
 | Live data | [MISO public APIs](https://www.misoenergy.org/markets-and-operations/rtdataapis/) - free JSON, no auth |
 | Documents | 9 curated MISO pages and PDFs (fact sheet, Market Reports catalog, readers' guides, interconnection process) |
+| Crosswalk | 18 report-to-API mappings, drafted by Claude from the readers' guides + the API spec, validated against the spec, reviewed by a human |
 
 There are two UIs on purpose: the React app (`frontend/`) is the demo, and the
 Streamlit app (`app.py`) is a one-command backup in case the demo machine has a bad day.
@@ -72,11 +76,20 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-Documents (once, with the backend stopped - about a minute):
+Documents and the crosswalk (once, with the backend stopped - a couple of minutes):
 
 ```bash
 python -m backend.rag.fetch_docs      # 9 polite downloads into data/docs/
-python -m backend.rag.ingest_docs     # chunk them into Chroma with citations
+python -m backend.rag.ingest_docs     # chunk them + the crosswalk into Chroma
+```
+
+The crosswalk ships already built (`backend/rag/crosswalk.json`). To regenerate it -
+after adding readers' guides, or with the official API spec from the Data Exchange
+portal dropped into `data/specs/`:
+
+```bash
+python -m backend.rag.build_crosswalk            # Claude drafts, the spec validates
+python -m backend.rag.build_crosswalk --promote  # after you read the draft
 ```
 
 That's it. On boot the backend loads the latest MISO snapshots into Chroma and starts
@@ -88,6 +101,17 @@ contact form instead of an error.)
 
 Backup UI: `streamlit run app.py`. Tests: `pytest` (634 tests on the poller, 100%
 branch coverage).
+
+## What it can answer
+
+| Ask | Answered from | Example |
+|---|---|---|
+| Live grid numbers | API snapshots, refreshed every 5 min | "how much wind right now?" |
+| Where to find data | the document corpus | "where's historical LMP data?" |
+| How a process works | the document corpus | "how does the interconnection queue work?" |
+| Old report -> new API | the crosswalk (+ CSV download) | "where did the RT LMP CSV's MLC column go?" |
+| Where / which states | the footprint map | "which states are in MISO South?" |
+| Anything else | graceful handoff | links MISO's contact form, never invents |
 
 ## Repo layout
 
@@ -139,6 +163,12 @@ Things we know about and chose not to do yet, so nobody rediscovers them.
   is asking Claude which sources it used; cosmetic, parked.
 - **Two processes must not write Chroma at once.** Stop the backend before
   running `ingest_docs`. Not enforced by code, only by this sentence.
+- **The crosswalk covers 18 reports from 3 readers' guides.** Adding a guide to
+  `doc_sources.json` and `build_crosswalk.GUIDES` extends it. The API spec it
+  validates against is a public reconstruction until someone signs into the
+  Data Exchange portal and downloads the official OpenAPI YAML into `data/specs/`.
+  The validator checks endpoint and field *names*; parameter *values* were
+  checked by hand against a working open-source client.
 
 ## Team
 

@@ -65,6 +65,13 @@ messages compact navy, right side. Never huge colored bubbles.
   horizontal-scroll wrapper), inline links (open in new tab), code blocks.
 - LaTeX math renders via KaTeX (`$...$` inline, `$$...$$` display) — real
   fractions and symbols, never plain-text approximations.
+- ` ```map ` fenced blocks render as a US map via `MapBlock.jsx`. Spec:
+  `{"title","highlight":["IN","IL",...],"label"}`. Every MISO state is tinted
+  (Primary Blue at 28%), the highlighted subset is solid Primary Blue, and the
+  legend always says "all or part of each tinted state, plus Manitoba" - MISO's
+  footprint follows utility boundaries, not state lines. Codes outside the
+  footprint are ignored, never drawn. Map paths are generated data
+  (`usStates.js`, from US Census boundaries) - no runtime map dependency.
 - ` ```chart ` fenced blocks render as Recharts charts via `ChartBlock.jsx`.
   Spec: `{"type":"line|bar|area|pie","title","unit","labels":[...],
   "series":[{"name","data":[...]}]}`, max 4 series. Invalid JSON falls back
@@ -87,8 +94,10 @@ works; never rely on color alone.
 React + plain CSS for all layout/styling — no UI component libraries.
 Approved rendering deps (all MIT): `react`, `react-dom`, `vite`,
 `@vitejs/plugin-react`, `react-markdown`, `remark-gfm`, `remark-math`,
-`rehype-katex`, `katex`, `recharts`. Anything else must be genuinely open
-source with a permissive license.
+`rehype-katex`, `katex`, `recharts`. Build-time only (ISC, never shipped):
+`us-atlas`, `topojson-client`, `d3-geo` - they generate `usStates.js` once.
+Anything else must be genuinely open source with a permissive license.
+Rejected on license: `@svg-maps/usa` (CC-BY-NC).
 
 ## 12. Backend contract
 

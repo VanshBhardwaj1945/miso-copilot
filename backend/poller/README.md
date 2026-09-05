@@ -42,7 +42,8 @@ plus the base URL and raw directory actually used. `ref_id_changed_at` is
 how a frozen feed stays visible: MISO can serve stale data successfully,
 and `last_success` alone will not show it.
 
-`_status.json` is what the RAG lane should read before answering. Note that
+`_status.json` is what the RAG lane should read before answering (it does
+not yet; a per-endpoint health strip is on the to-do list). Note that
 `cycle_finished_at` describes the cycle, not the data - a fresh cycle can
 sit beside a half-hour-old `last_success`.
 

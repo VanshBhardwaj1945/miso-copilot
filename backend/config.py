@@ -13,6 +13,15 @@ REALTIME_URL = (
 )
 MISO_HOME_URL = "https://www.misoenergy.org"
 
+# From the Corporate Fact Sheet map (June 2026): MISO serves all or PART of
+# these 15 states, plus Manitoba. Regions are approximate - MISO's real
+# boundaries follow member utilities, not state lines.
+MISO_STATES = {
+    "North": ["MN", "ND", "SD", "MT", "WI", "IA"],
+    "Central": ["IL", "IN", "MI", "MO", "KY"],
+    "South": ["AR", "LA", "MS", "TX"],
+}
+
 
 def _load_dotenv() -> None:
     """Tiny .env loader so we don't need python-dotenv."""

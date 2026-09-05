@@ -7,13 +7,16 @@ import "./MisoCopilot.css";
 // (/ask is proxied to FastAPI on :8000, see vite.config.js)
 
 const SUGGESTED_QUESTIONS = [
-  "What's the current fuel mix?",
   "How much wind power is MISO generating right now?",
   "Where can I find historical LMP (price) data?",
   "How does the generator interconnection queue work?",
+  "Where did the LMP report's MLC column go in the new API?",
 ];
 
 const CONTACT_URL = "https://www.misoenergy.org/about/contact-us/";
+
+// Crosswalk answers always name the API host; that is how we know to offer the CSV.
+const CROSSWALK_HINT = /apim\.misoenergy\.org/;
 
 const DEFAULT_SIZE = { width: 360, height: 520 };
 const MIN_SIZE = { width: 320, height: 380 };
@@ -254,6 +257,11 @@ export default function MisoCopilot() {
                         ↗ {s.title || s.url}
                       </a>
                     ))}
+                    {msg.role === "assistant" && CROSSWALK_HINT.test(msg.content || "") && (
+                      <a href="/crosswalk.csv" className="miso-source-chip miso-download-chip">
+                        ⬇ Download the full crosswalk (CSV)
+                      </a>
+                    )}
                   </div>
                 )}
               </div>

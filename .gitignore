@@ -28,6 +28,13 @@ agent-handoff.md
 /streamlit-8501.png
 /streamlit-check.png
 
+# iCloud conflict copies ("file 2.py") - never real files, never committed
+* 2
+* 2.*
+
+# crosswalk draft - review it, promote it, do not commit it
+backend/rag/crosswalk.draft.json
+
 # coverage artifacts
 .coverage
 htmlcov/

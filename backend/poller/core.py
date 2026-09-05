@@ -1,21 +1,10 @@
 """Fetch four MISO public JSON endpoints and write them verbatim to data/raw/.
 
-This is the whole job of the ingestion lane. It does not interpret what it
-downloads: the bytes MISO returns are the bytes written to disk. The RAG lane
-will read those files, and everything downstream - prose, embedding, Chroma,
-retrieval - belongs to it. Nothing reads them yet: backend/rag/ holds
-a README and no code.
-
-Two deliberate exceptions to "does not interpret": a shape gate that rejects
-HTML error pages and empty payloads, and a `ref_id` lifted out of each payload
-so that a frozen feed is visible in the status file.
-
-Every endpoint entry in `_status.json` carries an `outcome` of "ok", "failed"
-or "skipped". It is the only field describing THIS cycle and nothing else:
-`consecutive_failures`, `last_success` and `ref_id` are carried forward across
-cycles on purpose, so none of them can tell a cycle where everything failed
-from one where a rate-guard skip inherited a zero from an earlier success.
-Exit codes are read from `outcome` for exactly that reason.
+The bytes MISO returns are the bytes written to disk; the RAG lane reads them
+and does everything downstream. Two exceptions to "verbatim": a shape gate that
+rejects HTML error pages, and a `ref_id` lifted out so a frozen feed shows in
+the status file. Each endpoint's `outcome` (ok / failed / skipped) is the one
+field that describes THIS cycle; everything else carries forward.
 
 Entry point is poll_once().
 """
@@ -46,28 +35,17 @@ log = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://public-api.misoenergy.org"
 TIMEZONE = ZoneInfo("America/Indiana/Indianapolis")
 TIMEOUT = (5, 15)
-# requests' read timeout is per socket read, not a total. A server that sends
-# one byte every few seconds keeps every individual read comfortably inside
-# TIMEOUT[1] and the request never returns - measured, it was still running
-# after 90 seconds. With max_instances=1 on the scheduler one such reply stops
-# polling permanently and silently, so the body read carries its own deadline.
+# requests' read timeout is per socket read; a server dripping bytes never trips
+# it, so the body read carries its own total deadline
 MAX_REQUEST_SECONDS = 20
-# response.content buffers the whole body with no cap. A 256 MB reply cost
-# 582 MB of resident memory when measured, against a 28 MB baseline, and the
-# poller shares a process with the API serving /ask. The largest real payload
-# is about 12 KB, so this is roughly 2700x headroom and still bounded.
+# real payloads are ~12 KB; this process also serves /ask, so bodies are capped
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 BODY_CHUNK_BYTES = 64 * 1024
 HEADERS = {
     "User-Agent": "miso-copilot/0.1 (MISO Xtern Challenge 2026)",
     "Accept": "application/json",
-    # Spelled out rather than left to requests, because the body is read with
-    # raw.read1 - the one primitive that returns what has arrived instead of
-    # blocking until a full chunk exists - and read1 hands back bytes exactly
-    # as they came off the socket, undecoded. This lane therefore decodes
-    # them itself, and may only ask for encodings it can decode. MISO does
-    # serve these gzipped (spec 5.1), so refusing compression outright would
-    # mean refusing MISO.
+    # the body is read raw (see _read_body) and decoded here, so only ask for
+    # encodings this file can decode
     "Accept-Encoding": "gzip, deflate",
 }
 STALE_TMP_SECONDS = 600
@@ -87,13 +65,7 @@ def _shape_load(body: object) -> bool:
 
 
 def _shape_snapshot(body: object) -> bool:
-    """Non-empty array whose every row carries the four fields MISO publishes.
-
-    The per-row check earns its keep: Snapshot is the one endpoint with no
-    RefId, so the ref_id gate does not protect it, and it carries Current
-    Demand and Marginal Energy Cost - the numbers a judge asks for first.
-    Without this, `[{}]` would overwrite good data and record success.
-    """
+    """Non-empty array whose every row has MISO's four fields (Snapshot has no RefId to gate on)."""
     return (
         isinstance(body, list)
         and len(body) > 0
@@ -107,12 +79,7 @@ def _shape_windsolar(body: object) -> bool:
 
 
 class Endpoint(NamedTuple):
-    """One polled link: where it lives, what it must look like, its RefId.
-
-    A named tuple rather than a dict because every field is read by name in
-    five places, and a typo in a string key is a KeyError at poll time rather
-    than an error a checker can see.
-    """
+    """One polled link: where it lives, what it must look like, where its RefId is."""
 
     key: str
     path: str
@@ -137,12 +104,7 @@ ENDPOINTS = [
 # --- configuration ----------------------------------------------------------
 
 def safe_base(base: str) -> str:
-    """`base` with any userinfo removed, for logging and for the status file.
-
-    A base of the form http://user:pw@host would otherwise reach a WARNING
-    line every cycle, the `base_url` field in _status.json, and the --status
-    screen. None of those should ever carry a password.
-    """
+    """`base` with any user:password stripped - it reaches logs and the status file."""
     parts = urlsplit(base)
     if not parts.hostname:
         return base
@@ -153,14 +115,7 @@ def safe_base(base: str) -> str:
 
 
 def base_url() -> str:
-    """MISO's base URL, or a stub, normalized so it can be joined and compared.
-
-    Query and fragment are dropped, not just trailing slashes. requests
-    strips a fragment before sending, so a base carrying one would hand the
-    guard four distinct keys while putting four identical requests on the
-    wire - the guard satisfied, one link hit four times a cycle. The key we
-    claim and the URL we send have to be the same string.
-    """
+    """MISO's base URL (or a stub), normalized: the guard key and the URL sent must be the same string."""
     raw = (os.environ.get("MISO_API_BASE") or DEFAULT_BASE_URL).strip()
     parts = urlsplit(raw)
     if parts.scheme and parts.netloc:
@@ -169,19 +124,10 @@ def base_url() -> str:
 
 
 def raw_dir() -> Path:
-    """Where payloads are written.
-
-    Anchored to the repo root derived from this file, never to the working
-    directory, so `python -m backend.poller` writes the same place from
-    anywhere. This file is backend/poller/core.py, so the repo root is three
-    parents up - one more than backend/config.py needs.
-    """
+    """Where payloads are written: MISO_RAW_DIR if set, else <repo>/data/raw."""
     override = os.environ.get("MISO_RAW_DIR")
     if override:
-        # Resolved, because the status file records `raw_dir` as the
-        # absolute directory actually written. A relative override
-        # recorded verbatim as "relraw" identifies nothing, which defeats the
-        # only reason the field exists. The default below is already absolute.
+        # resolved, because the status file records the absolute dir written
         return Path(override).expanduser().resolve()
     return Path(__file__).resolve().parent.parent.parent / "data" / "raw"
 
@@ -201,11 +147,7 @@ def poll_seconds() -> int:
 
 
 def poller_enabled() -> bool:
-    """Whether FastAPI should register the scheduled job.
-
-    Every common spelling of "off" counts, because `MISO_POLLER_ENABLED=false`
-    meaning "on" would be a trap.
-    """
+    """Whether FastAPI should register the scheduled job; every spelling of "off" counts."""
     raw = os.environ.get("MISO_POLLER_ENABLED")
     if raw is None:
         return True
@@ -213,30 +155,16 @@ def poller_enabled() -> bool:
 
 
 def base_is_loopback(base: str) -> bool:
-    """True only when `base` provably names this machine.
+    """True only when `base` provably names this machine - the rate-guard bypass.
 
-    This is what the rate-guard bypass turns on. A local stub has no rate
-    limit and guarding it would silently cancel MISO_POLL_SECONDS below 60,
-    so the bypass has to exist - but it has to key on the destination, not
-    the spelling. Comparing the base string to DEFAULT_BASE_URL answered the
-    wrong question: `http://`, a capitalized host, an explicit `:443` and a
-    trailing dot are four different strings that all reach MISO, and each one
-    of them switched the guard off while every request still went to an
-    organization that IP-bans.
-
-    So the test is inverted. Loopback bypasses; anything else is guarded. A
-    hostname nobody anticipated - a typo, a proxy, a new spelling - then
-    fails safe, at the price of one guarded stub for anyone who binds a stub
-    to a non-loopback address.
-
-    No DNS. This decides in front of every fetch, and a resolver that maps
-    some name onto 127.0.0.1 is not worth a lookup in that path.
+    Keyed on the destination, not the spelling: comparing strings to the
+    default URL once let `http://`, a capital letter or `:443` switch the guard
+    off while still hitting MISO. Loopback bypasses; anything else is guarded.
+    No DNS lookup here - this runs in front of every fetch.
     """
     host = urlsplit(base).hostname
     if host is None:
         return False
-    # The root label is legal in a hostname and changes nothing about where
-    # the request lands, here or at MISO.
     host = host.rstrip(".")
     if host == "localhost":
         return True
@@ -247,12 +175,7 @@ def base_is_loopback(base: str) -> bool:
 
 
 def now() -> datetime:
-    """Our wall clock, offset-aware.
-
-    This is the team's local time, not MISO's. MISO stamps its data in fixed
-    EST year-round, so from March to November our timestamps and MISO's RefId
-    are an hour apart and both are correct.
-    """
+    """Our wall clock, offset-aware (local time; MISO's own stamps are fixed EST)."""
     return datetime.now(TIMEZONE)
 
 
@@ -261,20 +184,13 @@ def now() -> datetime:
 def write_atomic(path: Path, payload: bytes) -> None:
     """Write bytes so a reader sees the old file or the new one, never a partial.
 
-    The temp file gets a unique name from mkstemp rather than a fixed
-    "<file>.tmp". Two writers sharing one temp path can truncate each other
-    mid-write and publish a partial file as though it were complete;
-    os.replace being atomic does not save you from that.
-
-    The ".tmp" suffix is the pattern sweep_stale_tmp globs for. Change one
-    without the other and leftovers stop being cleaned up.
+    Unique temp name (two writers on one ".tmp" can truncate each other), then
+    an atomic os.replace. The ".tmp" suffix is what sweep_stale_tmp globs for.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     try:
-        # os.fdopen takes ownership of the descriptor only once it returns.
-        # If it raises - MemoryError is the realistic way - nothing else will
-        # ever close fd, and the process leaks one descriptor per call.
+        # fdopen owns fd only once it returns; close it ourselves if it raises
         try:
             handle = os.fdopen(fd, "wb")
         except BaseException:
@@ -284,27 +200,17 @@ def write_atomic(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        # mkstemp creates 0600; these files are a cross-lane interface.
-        os.chmod(tmp, 0o644)
+        os.chmod(tmp, 0o644)   # mkstemp makes 0600; the RAG lane reads these
         os.replace(tmp, path)
         tmp = None
     finally:
         if tmp is not None:
-            # suppress rather than check-then-act: a file that vanishes
-            # between the check and the unlink raises from the finally and
-            # masks whatever exception sent us here.
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmp)
 
 
 def sweep_stale_tmp(directory: Path) -> None:
-    """Delete leftover .tmp files older than STALE_TMP_SECONDS.
-
-    The age filter is the point. An unconditional sweep would delete a
-    concurrent writer's in-flight temp file and break its os.replace, trading
-    one hazard for another. STALE_TMP_SECONDS is far longer than a cycle and
-    far shorter than the gap between debugging sessions.
-    """
+    """Delete leftover .tmp files older than STALE_TMP_SECONDS (never a live writer's)."""
     cutoff = time.time() - STALE_TMP_SECONDS
     for leftover in directory.glob("*.tmp"):
         try:
@@ -317,11 +223,8 @@ def sweep_stale_tmp(directory: Path) -> None:
 
 # --- status file ------------------------------------------------------------
 
-# The shape every endpoint entry is built from, and the only keys carried
-# forward by _usable_entry. `outcome` is deliberately absent: it describes one
-# cycle, so it must be written fresh each cycle and never inherited. Leaving it
-# out means a stale value cannot survive a merge even if a future code path
-# forgets to set it.
+# the keys carried forward between cycles; `outcome` is deliberately absent
+# because it describes one cycle and must never be inherited
 INITIAL_ENTRY = {
     "last_attempt": None,
     "last_success": None,
@@ -340,17 +243,7 @@ def status_path(directory: Path) -> Path:
 
 
 def read_status(directory: Path) -> dict:
-    """Load _status.json, tolerating every way it can be unusable.
-
-    Missing, unparseable, or valid JSON that is not an object with an
-    `endpoints` object all mean the same thing: start over. A file holding
-    `[]` or `null` parses fine and is still no use.
-
-    RecursionError is in the tuple because a deeply nested file is exactly
-    the corrupt one an operator runs --status to inspect, and json raises it
-    rather than ValueError. Letting it escape killed both --once and the
-    diagnostic meant to explain why.
-    """
+    """Load _status.json; missing, unparseable or mis-shaped all mean "start fresh"."""
     try:
         data = json.loads(status_path(directory).read_text())
     except FileNotFoundError:
@@ -365,17 +258,11 @@ def read_status(directory: Path) -> dict:
 
 
 def _entry_is_usable(entry) -> bool:
-    """Whether a stored endpoint entry is safe to build this cycle on.
-
-    A hand-edited "consecutive_failures": "3" would raise on += 1, so entries
-    are type-checked rather than trusted.
-    """
+    """Whether a stored entry is safe to build on - the file is hand-editable, so type-check it."""
     if not isinstance(entry, dict):
         return False
     failures = entry.get("consecutive_failures")
-    # bool before int: True is an instance of int, so a hand-edited
-    # "consecutive_failures": true passed this gate and counted up from 1.
-    # A non-negative integer is required, and true is not one.
+    # bool is an int subclass; `true` must not count up from 1
     if isinstance(failures, bool) or not isinstance(failures, int):
         return False
     if failures < 0:
@@ -426,18 +313,10 @@ def _fetch_failure(error: str, status: int | None = None,
 
 def _validate(endpoint: Endpoint, content: bytes, status: int,
               size: int) -> dict:
-    """Parse and gate one 200 body. Returns a _fetch result dict.
-
-    This is the lane's entire interpretation budget: parse, shape gate,
-    ref_id. Pure, so it can be exercised with a bytes literal and no socket.
-    """
+    """Parse and gate one 200 body: JSON, shape, ref_id. Pure - no socket needed to test."""
     try:
         body = json.loads(content)
-    except (ValueError, RecursionError):
-        # A body nested thousands of levels deep raises RecursionError, not
-        # ValueError. It is still a payload we cannot parse, and reporting it
-        # as "internal error" pointed the operator at our code instead of at
-        # what the server sent.
+    except (ValueError, RecursionError):   # absurdly nested JSON raises the latter
         return _fetch_failure("invalid JSON", status, size)
 
     if not endpoint.shape(body):
@@ -451,26 +330,15 @@ def _validate(endpoint: Endpoint, content: bytes, status: int,
             "ref_id": ref_id, "content": content}
 
 
-# requests wraps urllib3's exceptions, but only on the paths that go through
-# requests. _read_body calls response.raw.read1 directly - the one primitive
-# that makes a deadline enforceable - and urllib3's own exceptions come back
-# out of it unwrapped. Both families have to be named here or a plain read
-# timeout arrives as "internal error" with a traceback, which is a lie about
-# whose fault it is.
+# _read_body reads response.raw directly, so urllib3's exceptions arrive
+# unwrapped alongside requests' own
 TRANSPORT_ERRORS = (requests.exceptions.RequestException,
                     urllib3.exceptions.HTTPError,
                     OSError)
 
 
 def _transport_error(e: Exception, endpoint: Endpoint) -> str:
-    """The closed-vocabulary name for a transport exception.
-
-    Order is load-bearing twice over. requests' ConnectTimeout subclasses
-    ConnectionError before Timeout, so a connect timeout reads as a
-    connection error unless Timeout is tested first. urllib3's IncompleteRead
-    subclasses HTTPError before http.client.IncompleteRead, so a truncated
-    body needs naming before the generic case.
-    """
+    """The closed-vocabulary name for a transport exception. Order matters: subclasses first."""
     if isinstance(e, (requests.exceptions.MissingSchema,
                       requests.exceptions.InvalidURL)):
         return "bad base url"
@@ -493,12 +361,7 @@ def _transport_error(e: Exception, endpoint: Endpoint) -> str:
 
 
 def _decoder_for(response):
-    """A decompressor for this reply, None if it is plain, or "unsupported".
-
-    zlib handles both encodings requests is allowed to ask for above: gzip
-    needs the 16 + MAX_WBITS window that tells zlib to expect a gzip header,
-    deflate is the bare stream.
-    """
+    """A decompressor for this reply, None if plain, or "unsupported"."""
     encoding = (response.headers.get("Content-Encoding") or "").strip().lower()
     if encoding in ("", "identity"):
         return None
@@ -512,21 +375,10 @@ def _decoder_for(response):
 def _read_body(response, deadline: float) -> tuple[bytes, str | None]:
     """The body, or (b"", reason) if it is too large, too slow, or unreadable.
 
-    Read with raw.read1 rather than iter_content or response.content, and the
-    choice is the whole point of this function.
-
-    response.content buffers the entire reply with no cap: a 256 MB reply cost
-    582 MB of resident memory when measured, and this process also serves
-    /ask. iter_content caps memory but not time - it blocks until it has a
-    full chunk, so a server dripping one byte at a time never yields control
-    and the deadline below would never be tested. read1 is the one primitive
-    that returns whatever has arrived, which is what makes a deadline
-    enforceable at all.
-
-    Both the compressed and the decompressed size are capped, because they
-    are two different ways to be hurt. Capping only what arrives would let a
-    few compressed KB expand into gigabytes; capping only the result would
-    let a slow enormous reply occupy the socket regardless.
+    raw.read1 is the one read that returns whatever has arrived: response.content
+    has no size cap and iter_content blocks until a full chunk exists, so
+    neither lets a deadline be enforced. Compressed and decompressed sizes are
+    capped separately - a few compressed KB can expand into gigabytes.
     """
     decoder = _decoder_for(response)
     if decoder == "unsupported":
@@ -550,10 +402,7 @@ def _read_body(response, deadline: float) -> tuple[bytes, str | None]:
             return b"", "timeout"
         if decoder is not None:
             try:
-                # max_length is what stops a compression bomb: zlib returns
-                # at most that many bytes and keeps the rest, so the check
-                # below sees the overflow without anything having allocated
-                # the full expansion first.
+                # max_length stops a compression bomb before it is allocated
                 chunk = decoder.decompress(
                     chunk, MAX_RESPONSE_BYTES - produced + 1)
             except zlib.error:
@@ -573,26 +422,17 @@ def _read_body(response, deadline: float) -> tuple[bytes, str | None]:
         except zlib.error:
             return b"", "truncated response"
         if not decoder.eof:
-            # The compressed stream ended before its own end marker. zlib
-            # does not raise for this - it just returns what it managed -
-            # so without the check a half payload would go on to fail the
-            # JSON gate and be reported as MISO sending bad JSON.
+            # zlib does not raise on a stream that ends early; catch it here
             log.warning("%s: compressed body ended early", response.url)
             return b"", "truncated response"
     return b"".join(chunks), None
 
 
 def _fetch(endpoint: Endpoint, url: str) -> dict:
-    """One request. Returns a result dict; never raises for a MISO-side problem.
+    """One request. Never raises for a MISO-side problem; every path returns the same six keys.
 
-    Every failure lands in the closed vocabulary of last_error values. Raw
-    exception text is deliberately not used - requests exceptions are
-    multi-line and embed the full URL, and this string reaches a file the RAG
-    lane may render.
-
-    Every path returns the same six keys - ok, error, http_status, bytes,
-    ref_id, content - with None where a value does not apply, so the caller
-    subscripts rather than guesses which ones are present.
+    Errors are a closed vocabulary, never raw exception text - that string
+    reaches a file the RAG lane may render.
     """
     deadline = time.monotonic() + MAX_REQUEST_SECONDS
     try:
@@ -601,9 +441,7 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
     except TRANSPORT_ERRORS as e:
         return _fetch_failure(_transport_error(e, endpoint))
 
-    # The body is read inside its own try: with stream=True the transport can
-    # still fail here, long after the headers arrived, and those failures
-    # belong in the same closed vocabulary as the ones above.
+    # with stream=True the transport can still fail while reading the body
     try:
         with response:
             status = response.status_code
@@ -612,17 +450,11 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
         return _fetch_failure(_transport_error(e, endpoint))
 
     if refused is not None:
-        # No size: nothing was kept, and a partial count would read as though
-        # that many bytes had been accepted.
         return _fetch_failure(refused, status)
 
     size = len(content)
     if 300 <= status < 400:
-        # requests drains a redirect's body itself, to free the connection
-        # while it works out where the redirect points. That is why the
-        # read above saw nothing: the bytes are already in memory. Falling
-        # back to them costs no read and keeps 6.3's rule that a body which
-        # arrived is always counted, redirect or not.
+        # requests drains a redirect body itself, so count what it already read
         return _fetch_failure(f"redirect {status}", status,
                               size or len(response.content))
     if status != 200:
@@ -634,16 +466,7 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
 # --- one endpoint, end to end -----------------------------------------------
 
 def _skipped_observation() -> dict:
-    """What a rate-guard skip leaves behind. Nothing was attempted.
-
-    last_error is None here rather than a rate-guard message, and
-    _merge_observation stops at `outcome`, so the stored entry keeps the
-    error it already had. An endpoint that has failed five times with HTTP
-    503 and is then guard-skipped must still report the 503: the operator
-    reading the file is debugging that incident, and "rate guard" would send
-    them after the wrong thing. The skip is not lost - outcome records it,
-    and guard.claim logged it.
-    """
+    """What a rate-guard skip leaves behind: nothing was attempted, so the stored error survives."""
     return {"outcome": "skipped", "last_attempt": None, "http_status": None,
             "bytes": None, "last_error": None, "ref_id": None}
 
@@ -657,17 +480,10 @@ def _internal_error_observation() -> dict:
 
 def _poll_endpoint(endpoint: Endpoint, url: str, directory: Path,
                    bypass_guard: bool) -> dict:
-    """Claim, fetch, validate and write one endpoint. Returns what it observed.
+    """Claim, fetch, validate and write one endpoint. Returns this cycle's observation.
 
-    Every path returns the same six keys, `outcome` among them, because that
-    is what the cycle's exit code is read from. Lifted out of poll_once so
-    the caller can wrap one endpoint's work in a single except clause without
-    that clause swallowing the loop itself.
-
-    Nothing here reads the stored status. The observation describes only this
-    cycle, and _merge_observation folds it onto the stored entry later, under
-    the status lock. That separation is what keeps a network request out of
-    that lock while still making the read-merge-write one critical section.
+    Never reads the stored status: the observation is merged onto it later,
+    under the status lock, so no network request happens inside that lock.
     """
     key = endpoint.key
 
@@ -703,15 +519,7 @@ def _poll_endpoint(endpoint: Endpoint, url: str, directory: Path,
 
 
 def _merge_observation(entry: dict, observed: dict) -> None:
-    """Fold one cycle's observation onto the stored entry. Mutates `entry`.
-
-    A skipped cycle stops at `outcome`: nothing was attempted, so every other
-    field keeps whatever the last real attempt left there.
-
-    `consecutive_failures`, `last_success`, `ref_id` and `ref_id_changed_at`
-    are carried forward from `entry`, so `entry` must be the version read
-    under the status lock and not the one that was current before the fetch.
-    """
+    """Fold one cycle's observation onto the stored entry (read under the lock). Mutates `entry`."""
     entry["outcome"] = observed["outcome"]
     if observed["outcome"] == "skipped":
         return
@@ -735,34 +543,16 @@ def _merge_observation(entry: dict, observed: dict) -> None:
 
 # --- pruning a removed endpoint ---------------------------------------------
 
-# What an endpoint key may look like before we will build a filename from it.
-# The status file is editable by hand, so a key is not trusted to be a safe
-# path component just because it was in there.
+# the status file is hand-editable, so a key is not a safe filename until proven
 SAFE_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _prune_payloads(directory: Path, previous_endpoints: dict,
                     current: dict) -> None:
-    """Delete the payload file of any endpoint that has left the table.
-
-    A pruned status entry whose .json is still sitting
-    beside it leaves the RAG lane a file that parses, passes a shape check,
-    looks live, and has no provenance anywhere.
-
-    Only the exact filename of a key we just pruned is unlinked - never a
-    glob, never _status.json, and never a key whose text could name something
-    else in the directory.
-    """
-    # Compared case-foldedly because this machine's filesystem is. A Path
-    # equality test is case-sensitive wherever it runs, so on APFS a status
-    # entry keyed "_STATUS" named a different Path, compared unequal, and
-    # unlinked the real status file.
+    """Delete the payload of any endpoint that left the table - exact filename only, never a glob."""
+    # casefolded: macOS and Windows filesystems are case-insensitive, so
+    # "Windsolar" and "WindSolar" (or "_STATUS") name the same file on disk
     status_key = status_path(directory).stem.casefold()
-    # Casefolded, because macOS and Windows filesystems are
-    # case-insensitive: a stale entry keyed "Windsolar" names the same
-    # file on disk as the live "WindSolar", so a case-sensitive test
-    # would delete the payload this very cycle just wrote and leave the
-    # status file swearing it succeeded.
     live = {k.casefold() for k in current}
     for key in previous_endpoints:
         if isinstance(key, str) and key.casefold() in live:
@@ -790,13 +580,7 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
 # --- one full cycle ---------------------------------------------------------
 
 def _log_configuration(base: str, bypass_guard: bool, directory: Path) -> None:
-    """Announce a non-default base and raw directory, once per cycle.
-
-    A non-default base has to be loud every cycle.
-    Whether the guard is on is a separate sentence, because a non-default
-    base that is not loopback still reaches MISO and is still guarded, and an
-    operator skimming the log must be able to tell the two apart at a glance.
-    """
+    """Announce a non-default base or raw dir every cycle, saying whether the guard is on."""
     if base != DEFAULT_BASE_URL:
         if bypass_guard:
             log.warning("MISO_API_BASE is %s - loopback, RATE GUARD BYPASSED",
@@ -809,13 +593,7 @@ def _log_configuration(base: str, bypass_guard: bool, directory: Path) -> None:
 
 
 def _all_skipped_status(directory: Path) -> dict:
-    """The status to return when the rate guard skipped every endpoint.
-
-    Nothing was fetched, so nothing is rewritten and no lock is needed: the
-    stored file still describes the last cycle that ran, and its payloads
-    stay beside it unpruned. With no stored file there is nothing to describe,
-    so a fresh entry per endpoint is synthesized to say so.
-    """
+    """The stored status (or a synthesized one) when the guard skipped every endpoint. Nothing is written."""
     previous = read_status(directory)
     unchanged = dict(previous) if previous else {
         "endpoints": {endpoint.key: dict(INITIAL_ENTRY, path=endpoint.path,
@@ -827,15 +605,7 @@ def _all_skipped_status(directory: Path) -> dict:
 
 def _write_status(directory: Path, observations: dict, base: str,
                   started: datetime) -> dict:
-    """Merge this cycle onto the stored status and write it. Returns what it wrote.
-
-    Read, merge, prune and write are one critical section. Unserialized, six
-    concurrent cycles all read the same consecutive_failures and all wrote it
-    plus one, and a partial overlap let the later writer drop the earlier
-    one's last_success and ref_id. The lock file is the raw directory's, not
-    the rate guard's, so a status write never waits behind a request lease -
-    and no fetch is inside it, every request has already returned.
-    """
+    """Merge this cycle onto the stored status and write it, as one locked read-merge-write."""
     with guard.file_lock(status_path(directory)):
         previous_endpoints = read_status(directory).get("endpoints", {})
         results = {}
@@ -880,10 +650,8 @@ def poll_once() -> dict:
 
     started = now()
 
-    # Every network request happens here, with no lock of ours held. The
-    # status file is not read yet: anything read before the fetches is stale
-    # by the time they finish, and merging onto a stale entry is how two
-    # concurrent cycles each counted one failure where there were two.
+    # all network requests happen here, with no lock held and the status file
+    # not yet read (reading it first is how two cycles once merged onto stale entries)
     observations = {}
     for endpoint in ENDPOINTS:
         key = endpoint.key
@@ -891,16 +659,10 @@ def poll_once() -> dict:
             observations[key] = _poll_endpoint(
                 endpoint, base + endpoint.path, directory, bypass_guard)
         except Exception:
-            # Any exception in one endpoint is
-            # recorded and the other three still run. _fetch names the
-            # failures it can foresee, so anything arriving here is a bug in
-            # our code and is reported as one.
+            # _fetch names every failure it can foresee; this is a bug in our code
             log.exception("%s: unexpected failure", key)
             observations[key] = _internal_error_observation()
 
-    # Read from this cycle's outcomes, not from a counter: "nothing was
-    # attempted" is exit 2 and "nothing succeeded" is exit 1, and a counter
-    # incremented mid-loop cannot say which one an internal error belongs to.
     if all(o["outcome"] == "skipped" for o in observations.values()):
         log.warning("every endpoint was skipped by the rate guard")
         return _all_skipped_status(directory)
@@ -909,12 +671,7 @@ def poll_once() -> dict:
 
 
 def succeeded_count(status: dict) -> int:
-    """How many endpoints succeeded in the cycle this status describes.
-
-    Read from `outcome`, the one field that describes this cycle. No
-    carried-forward field can answer it: last_success survives a total
-    outage, and consecutive_failures is left untouched by a rate-guard skip.
-    """
+    """How many endpoints succeeded this cycle - read from `outcome`, the only per-cycle field."""
     endpoints = status.get("endpoints", {})
     return sum(1 for e in endpoints.values()
                if isinstance(e, dict) and e.get("outcome") == "ok")

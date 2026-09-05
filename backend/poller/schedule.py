@@ -34,15 +34,9 @@ log = logging.getLogger(__name__)
 class DaemonThreadExecutor(BaseExecutor):
     """Runs each cycle on a daemon thread, so Ctrl-C is not held up.
 
-    APScheduler's default executor is a concurrent.futures thread pool,
-    and the interpreter joins those workers on the way out no matter what
-    their daemon flag says - concurrent.futures registers its own
-    threading atexit hook that joins them all. A cycle stuck on a slow
-    MISO therefore keeps the terminal looking frozen long after the
-    lifespan has finished: four links at a 15 second read timeout is up
-    to 80 seconds. MISO being slow is exactly when someone reaches for
-    Ctrl-C, so nothing may outlive the interpreter here. A plain daemon
-    thread is abandoned rather than joined.
+    APScheduler's default thread pool is joined at exit regardless of daemon
+    flags, so a cycle stuck on a slow MISO froze the terminal for up to 80 s -
+    exactly when someone reaches for Ctrl-C. A plain daemon thread is abandoned.
     """
 
     def _do_submit_job(self, job, run_times):
@@ -60,22 +54,13 @@ class DaemonThreadExecutor(BaseExecutor):
 
 
 def poller_blocked() -> tuple[int, str] | None:
-    """Why the poller must not be scheduled, as (log level, reason), or None.
-
-    Two reasons, one path: the poller was switched off, or the data directory
-    cannot be created. Both let the app boot with no job registered, so /ask
-    and /health keep serving. A third reason - apscheduler is not installed -
-    is handled by the caller, because this module cannot be imported at all
-    without it.
-    """
+    """Why the poller must not be scheduled, as (log level, reason), or None if it may."""
     if not core.poller_enabled():
         return logging.WARNING, "MISO_POLLER_ENABLED is off"
     directory = core.raw_dir()
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        # The local, not a second core.raw_dir() call: the message has to name
-        # the directory that actually failed, and two calls can disagree.
         return logging.ERROR, f"cannot create {directory} ({e})"
     return None
 
@@ -83,20 +68,13 @@ def poller_blocked() -> tuple[int, str] | None:
 def resync_rag() -> None:
     """Re-read data/raw/ into Chroma so answers follow the poller.
 
-    The import is here rather than at module scope on purpose. This module
-    promises apscheduler is its only import-time dependency, and the RAG lane
-    drags in chromadb, torch and sentence-transformers - seconds of import
-    and a much larger blast radius for a missing package. main.py does the
-    same lazy import for the same reason.
-
-    The seam between the lanes stays the filesystem: the poller writes files
-    and this says "go re-read them", it never hands the RAG lane data.
+    Imported late: this module promises apscheduler is its only import-time
+    dependency, and the RAG lane drags in chromadb and torch. The seam stays
+    the filesystem - this says "re-read the files", it never hands over data.
     """
     from backend.rag.ingest_api import sync_raw_snapshots
 
-    # core.raw_dir(), not the RAG lane's default: MISO_RAW_DIR moves where the
-    # poll just wrote, and feeding Chroma from data/raw/ instead would quietly
-    # re-ingest stale snapshots every cycle while the status file looked fine.
+    # core.raw_dir(), so MISO_RAW_DIR moves the poller and the ingest together
     results = sync_raw_snapshots(core.raw_dir())
     synced = sum(1 for ok in results.values() if ok)
     if synced == len(results):
@@ -108,16 +86,11 @@ def resync_rag() -> None:
 
 
 def run_cycle() -> None:
-    """One poll cycle and the Chroma re-sync, neither raising out of it.
+    """One poll cycle, then the Chroma re-sync; neither may raise or the schedule dies.
 
-    A cycle that threw would take the whole schedule down with it, so every
-    failure stops here and the next cycle still fires.
-
-    The two steps get their own handler each. Sharing one would report a
-    Chroma failure as "poll cycle failed", which costs somebody an hour
-    chasing a network problem that was a database problem. The re-sync also
-    runs after a failed poll: data/raw/ still holds the last good files, and
-    the sync is idempotent, so a Chroma that started empty still fills.
+    Separate handlers, so a Chroma failure is never logged as a poll failure.
+    The re-sync runs even after a failed poll: data/raw/ still holds the last
+    good files and the sync is idempotent.
     """
     try:
         core.poll_once()
@@ -131,27 +104,15 @@ def run_cycle() -> None:
 
 
 def start_scheduler() -> BackgroundScheduler | None:
-    """The started poll scheduler, or None if it would not start.
-
-    Every step here can raise - a MISO_POLL_SECONDS that APScheduler rejects,
-    a job store that will not take the job, a thread that will not start -
-    and none of it is worth refusing to boot over. That is the same bargain
-    run_cycle makes for one bad cycle, one level up: the poller is a
-    background convenience and /ask and /health are the demo.
-    """
+    """The started poll scheduler, or None if it would not start - never a reason not to boot."""
     scheduler = None
     try:
         seconds = core.poll_seconds()
         scheduler = BackgroundScheduler(
             executors={"default": DaemonThreadExecutor()})
-        # Exactly one job, not a one-shot plus an interval - two jobs fire
-        # two cycles at t=0. misfire_grace_time is the one value that is not
-        # APScheduler's default: 300 seconds rather than 1, so a cycle that
-        # came due while the laptop slept still runs on wake instead of
-        # being dropped as too late. coalesce and max_instances match the
-        # defaults and are spelled out because this job must never stack -
-        # one wake must not fire every cycle it slept through, and a slow
-        # cycle must not have the next one start on top of it.
+        # one job (a one-shot plus an interval fires twice at t=0); misfire grace
+        # of 300 s so a cycle missed during laptop sleep runs on wake; coalesce
+        # and max_instances spelled out because this job must never stack
         scheduler.add_job(
             run_cycle,
             IntervalTrigger(seconds=seconds),
@@ -171,19 +132,10 @@ def start_scheduler() -> BackgroundScheduler | None:
 
 
 def stop_scheduler(scheduler: BackgroundScheduler | None) -> None:
-    """Stop a scheduler that may never have been built or started.
-
-    shutdown() is only legal on a running scheduler: it raises outright if
-    start() never ran, and it joins a thread that a half-finished start()
-    never created. A scheduler that died on the way up must not raise a
-    second time on the way down, where the traceback would be about teardown
-    rather than the failure that actually mattered.
-    """
+    """Stop a scheduler that may never have been built or started, without raising."""
     if scheduler is None:
         return
     try:
         scheduler.shutdown(wait=False)
     except Exception:
-        # debug, not exception: a scheduler that never started is the
-        # expected case here, and log.exception would force it to ERROR.
         log.debug("scheduler was not running at shutdown", exc_info=True)

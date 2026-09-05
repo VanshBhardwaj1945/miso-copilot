@@ -26,6 +26,8 @@ link to MISO's contact form.
 ```
 POST /ask  {"question": "..."}
 → {"answer": "...", "sources": [{"title": "...", "url": "..."}], "as_of": "6:55 PM EST"}
+GET  /crosswalk.csv
+→ text/csv, one row per old-column -> new-field mapping
 ```
 
 ## Answer rendering
@@ -37,6 +39,11 @@ Assistant answers render rich content (`src/copilot/Markdown.jsx`):
 - Charts via Recharts: the backend emits ` ```chart ` fenced JSON blocks
   (`type`: line / bar / area / pie) that `ChartBlock.jsx` renders with a
   fixed colorblind-safe series palette
+- Maps: ` ```map ` blocks (`{"highlight": ["IN", ...]}`) render MISO's
+  footprint with the named states lit, via `MapBlock.jsx`. The state outlines
+  are generated once by `scripts/build-us-map.mjs` into `usStates.js`
+- A "Download the full crosswalk (CSV)" chip appears on answers about the
+  report-to-API crosswalk; it hits `GET /crosswalk.csv` (proxied like `/ask`)
 
 ## Dependencies
 

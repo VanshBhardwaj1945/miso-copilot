@@ -29,6 +29,18 @@ Chroma + LlamaIndex retrieval layer. Two feeds go in, one search comes out.
   metadata (paths, dates) is kept out of the embedding. Evicts the previous
   corpus first, so re-running never duplicates. Stop the backend before
   running it - two processes writing Chroma at once has corrupted it before.
+- `crosswalk.json` - the report-to-API crosswalk: 18 entries, each mapping one
+  retiring CSV market report (its columns, `HE 1..24`, `Value = MLC` row labels)
+  to the Data Exchange endpoint, parameters and field names that replace it,
+  plus a one-line note on the shape change. Ingested by `ingest_docs.py` as one
+  prose paragraph per entry, cited to the report's readers' guide.
+- `build_crosswalk.py` - drafts that file. Feeds each readers' guide plus the
+  endpoint catalog from `data/specs/` to Claude (structured output, so the reply
+  is always valid JSON), then a validator drops any endpoint or field not
+  literally in the spec. Writes `crosswalk.draft.json` (gitignored) for a human
+  to read; `--promote` turns it into `crosswalk.json`. Parameter *values*
+  (`preliminaryFinal=Final`, `timeResolution=hourly`) are not in the spec and
+  were checked by hand against gridstatus, an open-source client.
 - `retriever.py` - `search_docs(query)`: searches each lane separately -
   top-2 live snapshots and top-4 document chunks, by `doc_type` filter - and
   hands both to Claude, snapshots first. One shared top-k let Fact Sheet
@@ -39,7 +51,16 @@ Building the corpus (once, or whenever `doc_sources.json` changes):
 
 ```bash
 .venv/bin/python -m backend.rag.fetch_docs     # downloads 9 files, ~30 s
-.venv/bin/python -m backend.rag.ingest_docs    # backend stopped first
+.venv/bin/python -m backend.rag.ingest_docs    # docs + crosswalk; backend stopped first
+```
+
+Regenerating the crosswalk (after adding guides, or with the official spec):
+
+```bash
+.venv/bin/python -m backend.rag.build_crosswalk            # ~1 min, three Claude calls
+# read backend/rag/crosswalk.draft.json
+.venv/bin/python -m backend.rag.build_crosswalk --promote
+.venv/bin/python -m backend.rag.ingest_docs
 ```
 
 Chroma follows the poller: `schedule.run_cycle()` polls and then calls

@@ -377,6 +377,53 @@
   background: #ffffff;
 }
 
+.miso-msg-content pre:has(.miso-map) {
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.miso-map {
+  margin: 8px 0;
+  padding: 10px 8px 8px;
+  border: 1px solid #dce5eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.miso-map svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.miso-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  color: #526575;
+  font-size: 11px;
+}
+
+.miso-map-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border: 1px solid #dce5eb;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.miso-map-swatch-lit { background: #087cc1; }
+.miso-map-swatch-miso { background: rgba(8, 124, 193, 0.28); }
+
+.miso-map-note {
+  flex-basis: 100%;
+  font-style: italic;
+}
+
 .miso-chart-title {
   margin: 0 0 6px 6px;
   color: #092a47;
@@ -419,6 +466,12 @@
   font-weight: 500;
   text-decoration: none;
   transition: background 150ms ease, border-color 150ms ease;
+}
+
+.miso-download-chip {
+  border-color: #087cc1;
+  color: #092a47;
+  font-weight: 600;
 }
 
 .miso-source-chip:hover {

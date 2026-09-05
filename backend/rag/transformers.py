@@ -1,6 +1,4 @@
-'''
-Transform raw MISO JSON payloads into plain-English
-'''
+"""Each endpoint's raw JSON -> one plain-English snapshot paragraph (+ as-of, source URL)."""
 
 from typing import Any
 

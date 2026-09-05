@@ -8,10 +8,10 @@ Layout:
   config.py   env/.env loading, model + URL constants
   routes/     HTTP endpoints (/ask, /health)
   llm/        Claude client + system prompt
-  rag/        Chroma + LlamaIndex: JSON->prose, upsert, retrieval
-  poller/     fetches four MISO endpoints every 5 min and writes their
-              JSON verbatim to data/raw/; poller/schedule.py is the
-              APScheduler wiring this file starts at boot
+  rag/        Chroma + LlamaIndex: snapshots, document corpus, crosswalk,
+              retrieval
+  poller/     fetches four MISO endpoints every 5 min, writes their JSON
+              verbatim to data/raw/, then asks the RAG lane to re-sync
 """
 
 # Annotations are strings, so an annotation naming an optional dependency
@@ -24,13 +24,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from backend.routes.ask import router
+from backend.routes.crosswalk import router as crosswalk_router
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Update Chroma from data/raw/ immediately on boot
+    # sync Chroma from data/raw/ before the first request; the poller keeps
+    # it fresh from here (schedule.run_cycle)
     try:
         from backend.poller.core import raw_dir
         from backend.rag.ingest_api import sync_raw_snapshots
@@ -38,29 +40,13 @@ async def lifespan(app: FastAPI):
     except Exception as err:
         log.warning("Initial RAG snapshot sync skipped: %s", err)
 
-    """Start the poller at boot and stop it at shutdown.
-
-    The first cycle is scheduled rather than awaited: four network fetches in
-    front of uvicorn's boot look like a hung process on stage. There is
-    therefore a short window after boot where data/raw/ may be empty or
-    stale, which the RAG lane already handles.
-
-    A poller that cannot run - apscheduler missing, the poller switched off,
-    a data directory that cannot be created, or a scheduler that will not
-    start - registers no job and lets the app boot anyway, so /ask and
-    /health keep serving.
-    """
+    # Start the poller, stop it at shutdown. Every failure below - apscheduler
+    # missing, poller switched off, no data dir, scheduler won't start -
+    # registers no job and boots anyway: /ask and /health are the demo.
     try:
         from backend.poller import schedule
     except ImportError as e:
-        # apscheduler is optional. The API is the demo; the poller is a
-        # background convenience, and a missing dependency must not stop
-        # /ask and /health from serving. python -m backend.poller still
-        # works, so the poller can be run beside the API instead.
-        #
-        # Name the module that actually failed. This except covers the whole
-        # import chain, so blaming apscheduler for a missing requests costs
-        # somebody twenty minutes chasing the wrong package.
+        # name the module that actually failed, not always apscheduler
         missing = e.name or "a dependency"
         log.warning("no poll job registered - %s is not installed. "
                     "Install it with: pip install %s", missing, missing)
@@ -84,3 +70,4 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MISO Copilot API", lifespan=lifespan)
 app.include_router(router)
+app.include_router(crosswalk_router)

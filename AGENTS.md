@@ -22,10 +22,12 @@ frontend/                   # React (Vite) demo UI
   UI_RULES.md               #   design rules & locked palette - read before touching UI
 backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   config.py                 #   .env loading, model + URL constants
-  routes/                   #   /ask and /health endpoints
+  routes/                   #   /ask, /health, and /crosswalk.csv
   llm/                      #   Claude client + system prompt
   rag/                      #   Chroma + LlamaIndex: transformers, both ingests, retriever;
-                            #   doc_sources.json is the curated document corpus
+                            #   doc_sources.json = the document corpus (URLs),
+                            #   crosswalk.json = report->API mappings, build_crosswalk.py
+                            #   drafts them with Claude and validates against the spec
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
@@ -37,7 +39,8 @@ infra/                      # validated Terraform sketch of a future cloud
                             #   deployment - reference only, never applied
 data/                       # gitignored, never commit. Chroma persistence, plus
                             #   data/raw/ (poller output), data/raw.backup/
-                            #   (demo fallback) and data/docs/ (fetched corpus)
+                            #   (demo fallback), data/docs/ (fetched corpus) and
+                            #   data/specs/ (Data Exchange OpenAPI specs)
 requirements.txt            # deps stay commented until the code that imports them lands
 ```
 
@@ -99,11 +102,15 @@ handoff is fine). If you add backend code, also verify `uvicorn` boots and
 `/ask` responds. The React
 dev server proxies `/ask` to `localhost:8000` (vite.config.js) - keep that
 contract: `POST /ask {question}` → `{answer, sources[{title,url}], as_of}`.
-`answer` is markdown and may contain LaTeX (`$...$`/`$$...$$`) and ` ```chart `
+`answer` is markdown and may contain LaTeX (`$...$`/`$$...$$`), ` ```chart `
 fenced JSON blocks (`{"type":"line|bar|area|pie","title","unit","labels",
-"series":[{"name","data"}]}`, max 4 series) - both UIs render all of it, so
-keep the chart spec stable across prompt, React (`ChartBlock.jsx`), and
-Streamlit (`render_answer` in app.py). Frontend rule: React + plain CSS for
+"series":[{"name","data"}]}`, max 4 series) and ` ```map ` blocks
+(`{"title","highlight":[state codes],"label"}`) - both UIs render all of it,
+so keep both specs stable across prompt, React (`ChartBlock.jsx`,
+`MapBlock.jsx`), and Streamlit (`render_answer` in app.py, which lists the
+map's states as a caption instead of drawing). The map's state list is data
+in `config.MISO_STATES`; the prompt may only highlight from it and the widget
+ignores anything else. Frontend rule: React + plain CSS for
 layout, no UI component libraries; approved rendering deps are listed in
 frontend/UI_RULES.md §11.
 
@@ -140,6 +147,12 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
    via the Anthropic API with a single tool, `search_docs(query)`.
 9. **Out-of-scope questions get a graceful handoff** to MISO's contact form - never
    a hallucinated answer.
+10. **The crosswalk is "AI drafts, human approves."** `build_crosswalk.py` has Claude
+    propose report->API mappings, then drops any endpoint or field name that is not
+    literally in the OpenAPI spec, then writes a *draft*. A human reads it and runs
+    `--promote`. Never hand-edit `crosswalk.json` into something the spec cannot
+    vouch for, and never let the prompt invent a field name - a wrong mapping sends
+    a trader to the wrong column, which is worse than no crosswalk.
 
 ## Hard external constraints (from MISO mentors - violating these can get us banned)
 
@@ -172,6 +185,11 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
   abstraction.
 - Keep `requirements.txt` honest: dependencies stay commented out until the code
   that imports them lands.
+- Comments are one-liners that say *why*, not essays. If a decision needs a
+  paragraph, it goes in the module docstring or the folder README.
+- `.gitignore` refuses any file named `* 2` / `* 2.*`: the repo lives in an
+  iCloud-synced folder and iCloud drops such conflict copies, even inside `.git/`.
+  If git errors oddly, look for them.
 - Docstrings state what a module does and what's stubbed/pending (see `app.py`).
 - If you change the architecture picture, update `docs/architecture.svg` (the
   simple one the README embeds) and `docs/architecture-detailed.svg` (plus its

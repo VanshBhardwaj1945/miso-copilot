@@ -15,6 +15,7 @@ from pathlib import Path
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.schema import Document
 
 from backend.rag.store import get_chroma_collection, get_index
 
@@ -24,6 +25,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 HERE = Path(__file__).resolve().parent
 SOURCES_PATH = HERE / "doc_sources.json"
+CROSSWALK_PATH = HERE / "crosswalk.json"
 DOCS_DIR = HERE.parent.parent / "data" / "docs"
 
 # LlamaIndex stamps every file with these; none of them mean anything to a
@@ -79,9 +81,51 @@ def ingest_general_docs() -> int:
         index.insert_nodes(nodes)
         total += len(nodes)
 
+    total += ingest_crosswalk(index)
+
     print(f"Ingested {total} chunks from {len(documents)} document pages "
           f"({len(citations)} sources) into Chroma")
     return total
+
+
+def crosswalk_prose(entry: dict) -> str:
+    """One crosswalk entry as the paragraph a person would ask for."""
+    mapping = "; ".join(
+        f"{f['old']} -> {f['new']}" + (f" ({f['note']})" if f.get("note") else "")
+        for f in entry["fields"]
+    )
+    params = ", ".join(f"{k}={v}" for k, v in entry.get("params", {}).items()) or "none"
+    old_file = f" (file {entry['old_file']})" if entry.get("old_file") else ""
+    return (
+        f"Report-to-API crosswalk for the '{entry['report']}' market report{old_file}. "
+        f"This report's data moves to the MISO Data Exchange {entry['api']} API: "
+        f"{entry['endpoint']} at {entry['base_url']}, with parameters {params}. "
+        f"Column mapping, old report column -> new API field: {mapping}. "
+        f"Shape: {entry.get('shape', '')} "
+        f"A free Data Exchange subscription key is required to call it."
+    )
+
+
+def ingest_crosswalk(index) -> int:
+    """Each crosswalk entry goes in as its own small document, cited to its readers' guide."""
+    if not CROSSWALK_PATH.exists():
+        return 0
+    entries = json.loads(CROSSWALK_PATH.read_text(encoding="utf-8"))["entries"]
+    for entry in entries:
+        # no chunking - one entry is already one paragraph, like a live snapshot
+        doc = Document(
+            text=crosswalk_prose(entry),
+            metadata={
+                "doc_type": "reference_doc",
+                "title": f"Crosswalk: {entry['report']} -> Data Exchange API",
+                "source_url": entry["report_url"],
+            },
+            excluded_embed_metadata_keys=["source_url", "doc_type"],
+            excluded_llm_metadata_keys=["source_url", "doc_type"],
+        )
+        index.insert(doc)
+    print(f"  + {len(entries)} crosswalk entries")
+    return len(entries)
 
 
 if __name__ == "__main__":

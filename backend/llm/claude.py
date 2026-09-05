@@ -11,7 +11,7 @@ from backend.rag.retriever import search_docs
 
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY) if CLAUDE_API_KEY else None
 
-# Set to True to force Mock Mode, or False to use your real Claude API key
+# True returns the retrieved context verbatim, no Claude call - handy for testing retrieval
 FORCE_MOCK = False
 
 def answer_question(question: str) -> tuple[str, list[dict]]:
@@ -40,7 +40,7 @@ def answer_question(question: str) -> tuple[str, list[dict]]:
 
     response = client.beta.messages.create(
         model=MODEL,
-        max_tokens=2000,
+        max_tokens=4000,   # crosswalk tables and multi-report answers run long
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
         system=SYSTEM_PROMPT,

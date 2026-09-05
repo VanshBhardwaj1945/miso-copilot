@@ -47,14 +47,9 @@ def ask(req: AskRequest, request: Request):
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         security.log_request(ip, req.question, outcome, elapsed_ms)
 
-    # Fixed EST, not a DST-observing zone. MISO publishes every timestamp in
-    # fixed EST year-round - its own Snapshot feed stamped "5:25:00 PM EST"
-    # at 22:27 UTC on 4 Sep 2026, which is UTC-5 while Eastern was on EDT.
-    # America/New_York would print an hour later than MISO's own displays
-    # from March to November. Swapping to America/Indiana/Indianapolis fixes
-    # nothing: it observes DST identically. The fix is the fixed offset.
-    # Matches the contract already written in frontend/UI_RULES.md,
-    # frontend/README.md, README.md and AGENTS.md, all of which say EST.
+    # fixed EST, not America/New_York: MISO stamps everything in EST year-round
+    # (its Snapshot feed said "5:25 PM EST" at 22:27 UTC in September), so a
+    # DST-aware zone would read an hour off MISO's own displays all summer
     as_of = datetime.now(ZoneInfo("EST")).strftime("%-I:%M %p EST")
     return {"answer": answer, "sources": sources, "as_of": as_of}
 

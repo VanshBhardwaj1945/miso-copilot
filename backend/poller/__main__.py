@@ -36,14 +36,9 @@ EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_SKIPPED = 2
 
-# How far last_success may outrun ref_id_changed_at before we call the feed
-# frozen. MISO publishes on a 5-minute grid, so three missed publications is
-# a real stall rather than a slow interval.
+# three missed 5-minute publications = a stalled feed, not a slow interval
 FROZEN_AFTER_SECONDS = 900
 
-# The command every "nothing to show you yet" path tells the operator to run.
-# One constant because two paths print it and a status screen that offers two
-# different commands for the same job looks unrehearsed.
 RUN_HINT = ".venv/bin/python -m backend.poller --once"
 
 
@@ -75,30 +70,15 @@ def run_once() -> int:
 
 
 def run_loop() -> NoReturn:
-    """Poll now and then forever on the interval. Only Ctrl-C ends it.
-
-    NoReturn, not int: there is no break and no return below, so the only way
-    out is KeyboardInterrupt, which main() catches. Each cycle's exit code is
-    deliberately dropped - a long-running poller reports through its log, and
-    one bad cycle is not a reason to stop polling.
-    """
+    """Poll now and then forever on the interval. Only Ctrl-C (caught by main) ends it."""
     seconds = core.poll_seconds()
     log.info("polling every %d seconds, Ctrl-C to stop", seconds)
     while True:
         try:
             run_once()
         except Exception:
-            # One bad cycle must never end the loop. KeyboardInterrupt is not
-            # an Exception, so Ctrl-C still gets through.
-            log.exception("cycle raised, continuing")
-        # The sleep runs after the cycle, not alongside it, so the real period
-        # is the cycle's duration plus this interval and drifts a little later
-        # every time. That is the honest reading of "one every
-        # MISO_POLL_SECONDS": a few seconds of drift per cycle is invisible
-        # against MISO's 5-minute publication grid, and a fixed-rate schedule
-        # would have to decide what to do when a cycle overran its own
-        # interval - which is exactly the stacking the FastAPI scheduler
-        # spells out max_instances=1 to prevent.
+            log.exception("cycle raised, continuing")   # Ctrl-C is not an Exception
+        # sleep after the cycle, so cycles can never stack
         time.sleep(seconds)
 
 
@@ -120,14 +100,7 @@ def duration_text(seconds: float) -> str:
 
 
 def parse_stamp(value: object) -> datetime | None:
-    """An ISO timestamp from the status file, or None if it is unusable.
-
-    Naive timestamps are unusable, not merely unwelcome: age_text subtracts
-    what this returns from an offset-aware reference, and mixing an aware and
-    a naive datetime raises TypeError. The status file is hand-editable, so a
-    naive stamp is a thing that can arrive, and printing "unreadable" beats
-    crashing the one command an operator runs to find out what is wrong.
-    """
+    """An aware ISO timestamp from the status file, or None (naive stamps would raise in age_text)."""
     if not isinstance(value, str):
         return None
     try:
@@ -152,16 +125,7 @@ def age_text(value: object, reference: datetime) -> str:
 
 def feed_text(entry: dict[str, Any], endpoint: core.Endpoint,
               reference: datetime) -> str:
-    """One phrase describing whether this endpoint's data is actually moving.
-
-    A feed can be frozen while perfectly healthy: MISO keeps serving 200s,
-    last_success marches forward, consecutive_failures stays 0, and the
-    numbers never change. The gap between last_success and ref_id_changed_at
-    is what makes that visible.
-
-    Takes the endpoint row rather than a boolean derived from it, so the
-    caller does not have to know that "has a ref_id" means ref_path is set.
-    """
+    """Whether this endpoint's data is moving: a feed can serve 200s forever while its RefId never changes."""
     if endpoint.ref_path is None:
         return "n/a - this endpoint has no ref_id"
 
@@ -177,24 +141,12 @@ def feed_text(entry: dict[str, Any], endpoint: core.Endpoint,
 
 
 def _print_header(directory: object, base: str | None = None) -> None:
-    """The opening lines every --status path shares, in one place.
-
-    Three paths print this - a full summary, a missing status file and an
-    unusable one - and they used to print it three times with small
-    variations. Only the full summary has a base_url to show, so that line is
-    optional; everything else is identical by construction.
-    """
+    """The opening lines every --status path shares."""
     print("MISO poller status")
     if base is not None:
         print(f"  base_url  {base}")
         if base != core.DEFAULT_BASE_URL:
-            # Only what the test above actually establishes. This compares
-            # strings, and "not the default string" is not "not MISO":
-            # http://, a capitalized host, an explicit :443 and a trailing
-            # dot all reach MISO and all fail this comparison. Calling four
-            # genuine MISO fetches "NOT MISO" on the operator's screen is
-            # worse than saying less. See core.base_is_loopback, which
-            # exists because that comparison answered the wrong question.
+            # say only what a string compare proves; "not default" is not "not MISO"
             print("            not the default base - a stub or an override")
     print(f"  raw_dir   {directory}")
 
@@ -274,9 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     """Configure logging, pick a door, and return the process exit code."""
     args = parse_args(argv)
 
-    # Only here, never at import. INFO rather than DEBUG so that a --once run
-    # is self-evidencing: the root logger defaults to WARNING, so DEBUG lines
-    # would make a successful run print nothing at all.
+    # configured here only, never at import; INFO so a --once run shows its work
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -287,10 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.loop:
         try:
-            # No value to return: run_loop is NoReturn, so the only way past
-            # this call is the Ctrl-C below, and stopping on purpose is a
-            # success.
-            run_loop()
+            run_loop()   # NoReturn; Ctrl-C is the only way out, and a success
         except KeyboardInterrupt:
             log.info("stopped")
         return EXIT_OK
