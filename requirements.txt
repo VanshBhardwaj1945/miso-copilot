@@ -1,5 +1,6 @@
 streamlit>=1.37
 requests>=2.32
+tzdata # zoneinfo's database - present on macOS, absent in slim containers
 fastapi
 uvicorn
 anthropic

@@ -13,8 +13,11 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 
 COPY backend/ backend/
 
-# data/ (snapshots, Chroma, request log) is a volume in any real deployment
-RUN useradd --create-home app && mkdir -p data && chown -R app:app /app
+# data/ (snapshots, Chroma, request log) is a volume in any real deployment.
+# /home/app/.cache must exist app-owned in the image, so a named volume
+# mounted there inherits that ownership instead of root's.
+RUN useradd --create-home app && mkdir -p data /home/app/.cache \
+    && chown -R app:app /app /home/app
 USER app
 
 EXPOSE 8000
