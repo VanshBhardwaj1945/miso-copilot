@@ -24,7 +24,8 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   config.py                 #   .env loading, model + URL constants
   routes/                   #   /ask and /health endpoints
   llm/                      #   Claude client + system prompt
-  rag/                      #   Chroma + LlamaIndex: transformers, ingest, retriever
+  rag/                      #   Chroma + LlamaIndex: transformers, both ingests, retriever;
+                            #   doc_sources.json is the curated document corpus
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
@@ -35,8 +36,8 @@ docs/                       # architecture diagrams: architecture.svg (README) +
 infra/                      # validated Terraform sketch of a future cloud
                             #   deployment - reference only, never applied
 data/                       # gitignored, never commit. Chroma persistence, plus
-                            #   data/raw/ (poller output) and data/raw.backup/
-                            #   (demo fallback)
+                            #   data/raw/ (poller output), data/raw.backup/
+                            #   (demo fallback) and data/docs/ (fetched corpus)
 requirements.txt            # deps stay commented until the code that imports them lands
 ```
 
@@ -132,7 +133,9 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
    `SentenceSplitter` chunks (~512 tokens, ~50 overlap) → embed → Chroma. Poller
    snapshots: the RAG lane builds a single small `Document` per endpoint from
    `data/raw/`, with a fixed `doc_id` and **no chunking**.
-   Query: `index.as_retriever(similarity_top_k=4)` over the same collection.
+   Query: one search per lane over the same collection - top-2 snapshots plus
+   top-4 document chunks, filtered by `doc_type` - so document chunks can never
+   crowd the live numbers out of a question.
 8. **Embeddings are local** (sentence-transformers all-MiniLM-L6-v2). LLM is Claude
    via the Anthropic API with a single tool, `search_docs(query)`.
 9. **Out-of-scope questions get a graceful handoff** to MISO's contact form - never
@@ -141,7 +144,9 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 ## Hard external constraints (from MISO mentors - violating these can get us banned)
 
 - **Do NOT scrape miso.org.** It has anti-scraping protection; scrapers get
-  IP-banned. Use the public APIs and politely-fetched documents only.
+  IP-banned. Use the public APIs and politely-fetched documents only. The
+  document corpus is nine hand-picked URLs in `backend/rag/doc_sources.json`,
+  fetched once with a pause between requests - add to the list, never crawl.
 - **Rate limit: max ~1 request per endpoint per minute** against
   `https://public-api.misoenergy.org` (free JSON, no auth). The 5-min poller is
   already far under this, and a per-link lease in
@@ -171,7 +176,6 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - If you change the architecture picture, update `docs/architecture.svg` (the
   simple one the README embeds) and `docs/architecture-detailed.svg` (plus its
   PNG render) - both are hand-edited SVG.
-- Update `README.md` when the remaining planned piece (doc corpus in data/docs/) becomes real.
 - Tests live in `tests/`, named for the behavior they protect rather than the
   function they call. Where a test exists because of a bug that actually
   happened, say so in a line above it - that is what stops someone deleting it

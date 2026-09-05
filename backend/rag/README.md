@@ -1,7 +1,6 @@
 # backend/rag
 
-Chroma + LlamaIndex retrieval layer. Implemented; the doc corpus is the one
-piece still empty.
+Chroma + LlamaIndex retrieval layer. Two feeds go in, one search comes out.
 
 - `store.py` - Chroma embedded store (persists in `data/chroma/`, gitignored)
   + local embeddings (all-MiniLM-L6-v2). The ONLY store.
@@ -14,15 +13,38 @@ piece still empty.
   pass `core.raw_dir()` so `MISO_RAW_DIR` moves the poller and the ingest
   together. Inserts before deleting, so a question arriving mid-write sees a
   duplicate the retriever collapses rather than no snapshot at all.
-- `retriever.py` - `search_docs(query)`: top-4 vector search over the same
-  collection, returns context + source links + freshest "as of".
-- `ingest_docs.py` - one-time chunked ingestion for reference documents.
-  Put files in `data/docs/` and run `python -m backend.rag.ingest_docs`.
-  **`data/docs/` is currently empty** - the "where do I find X" lane has
-  nothing to search until it's fed.
+- `doc_sources.json` - the curated reference corpus: nine documents, each with
+  the local filename, the misoenergy.org URL we cite, and (when different) the
+  URL we download from. This list is the reproducible part; MISO's files are not.
+- `fetch_docs.py` - one-time polite download of that list into `data/docs/`
+  (gitignored): browser User-Agent, a pause between requests, no link-following.
+  PDFs are checked for real `%PDF` bytes (a rotated CDN filename returns an
+  AccessDenied XML with a 200). HTML pages - the Market Reports catalog and
+  the generator-interconnection page - are converted to small markdown files,
+  with each list item prefixed by its section heading so a chunk from the
+  middle of a long list still says which category it belongs to.
+- `ingest_docs.py` - chunks everything in `data/docs/` (SentenceSplitter,
+  512 tokens, 50 overlap) into Chroma as `doc_type: reference_doc`, stamping
+  each chunk with the title and citation URL from `doc_sources.json`. File
+  metadata (paths, dates) is kept out of the embedding. Evicts the previous
+  corpus first, so re-running never duplicates. Stop the backend before
+  running it - two processes writing Chroma at once has corrupted it before.
+- `retriever.py` - `search_docs(query)`: searches each lane separately -
+  top-2 live snapshots and top-4 document chunks, by `doc_type` filter - and
+  hands both to Claude, snapshots first. One shared top-k let Fact Sheet
+  chunks crowd the live numbers out of "what are grid conditions?" questions;
+  a seat per lane is the fix. Returns context + source links + freshest "as of".
+
+Building the corpus (once, or whenever `doc_sources.json` changes):
+
+```bash
+.venv/bin/python -m backend.rag.fetch_docs     # downloads 9 files, ~30 s
+.venv/bin/python -m backend.rag.ingest_docs    # backend stopped first
+```
 
 Chroma follows the poller: `schedule.run_cycle()` polls and then calls
 `sync_raw_snapshots()`, so answers no longer freeze at boot-time data. The
 re-sync runs even when the poll failed - `data/raw/` still holds the last
 good files and the sync is idempotent, so a Chroma that started empty fills
-itself on the next cycle.
+itself on the next cycle. Documents are refreshed by re-running the two
+commands above; they change monthly to yearly, not every five minutes.

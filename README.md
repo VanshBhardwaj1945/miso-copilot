@@ -16,7 +16,9 @@ has 11 categories of files with almost no filtering. So everyone from curious ci
 utility analysts emails MISO's human teams instead.
 
 **MISO Copilot deflects those routine questions**: ask in plain English, get an answer
-with a source link, sourced from MISO's own public data.
+with a source link, sourced from MISO's own public data. Live questions ("how much wind
+right now?") are answered from MISO's APIs; "where do I find X?" questions are answered
+from a small curated set of MISO's own documents - and the link is the answer.
 
 ## How it works
 
@@ -45,7 +47,8 @@ Everything runs locally and free, except Claude API calls (pennies).
 | Retrieval | LlamaIndex + Chroma (local vector DB) |
 | Embeddings | sentence-transformers, runs on-device |
 | LLM | Claude (Anthropic API) |
-| Data | [MISO public APIs](https://www.misoenergy.org/markets-and-operations/rtdataapis/) - free JSON, no auth |
+| Live data | [MISO public APIs](https://www.misoenergy.org/markets-and-operations/rtdataapis/) - free JSON, no auth |
+| Documents | 9 curated MISO pages and PDFs (fact sheet, Market Reports catalog, readers' guides, interconnection process) |
 
 There are two UIs on purpose: the React app (`frontend/`) is the demo, and the
 Streamlit app (`app.py`) is a one-command backup in case the demo machine has a bad day.
@@ -69,10 +72,19 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
+Documents (once, with the backend stopped - about a minute):
+
+```bash
+python -m backend.rag.fetch_docs      # 9 polite downloads into data/docs/
+python -m backend.rag.ingest_docs     # chunk them into Chroma with citations
+```
+
 That's it. On boot the backend loads the latest MISO snapshots into Chroma and starts
 the 5-minute poller. Ask the widget "what's the current fuel mix?" and you'll get real
-grid numbers with a chart, an "as of" time, and a source link. (No API key? The backend
-returns a graceful handoff to MISO's contact form instead of an error.)
+grid numbers with a chart, an "as of" time, and a source link. Ask "where do I find
+historical LMP data?" and you'll get the right Market Reports category with links to
+the readers' guides. (No API key? The backend returns a graceful handoff to MISO's
+contact form instead of an error.)
 
 Backup UI: `streamlit run app.py`. Tests: `pytest` (634 tests on the poller, 100%
 branch coverage).
@@ -84,7 +96,7 @@ frontend/          # React demo UI: landing page + Copilot chat widget
 backend/
   routes/          #   /ask and /health
   llm/             #   Claude client + system prompt
-  rag/             #   JSON -> prose -> Chroma, and retrieval
+  rag/             #   JSON -> prose -> Chroma, doc corpus -> Chroma, retrieval
   poller/          #   5-min poller with a hard rate guard
 app.py             # Streamlit backup UI
 tests/             # poller test suite
@@ -104,11 +116,6 @@ For contributor rules and the full architecture constraints, see
   - holds recent question &rarr; answer pairs in memory
   - checks the cache before calling Claude
   - clears itself whenever the poller brings fresh data
-- **Document search** - the machinery for "where do I find X report?" is built
-  and waiting on documents.
-  - put MISO PDFs / key pages into `data/docs/`
-  - run `ingest_docs.py` once - it chunks and stores them in Chroma
-  - answers can then point people at the exact right report
 - **MCP server** - let other people's AI assistants automate on our data.
   - a small server that speaks MCP (the open standard AI tools use)
   - exposes tools like `get_fuel_mix()` and `search_miso(question)`

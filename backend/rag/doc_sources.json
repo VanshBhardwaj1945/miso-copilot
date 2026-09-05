@@ -1,0 +1,50 @@
+[
+  {
+    "file": "market-reports-catalog.md",
+    "title": "MISO Market Reports catalog - every report category and its readers' guide",
+    "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/"
+  },
+  {
+    "file": "generator-interconnection-process.md",
+    "title": "MISO Generator Interconnection - process phases, fees, queue tools and forms",
+    "url": "https://www.misoenergy.org/planning/resource-utilization/generator-interconnection/"
+  },
+  {
+    "file": "corporate-fact-sheet-2026-06.pdf",
+    "title": "MISO Corporate Fact Sheet (June 2026)",
+    "url": "https://www.misoenergy.org/meet-miso/media-center/corporate-fact-sheet/",
+    "fetch": "https://cdn.misoenergy.org/June%202026%20Corp%20Fact%20Sheet763163.pdf"
+  },
+  {
+    "file": "readers-guide-real-time-final-lmps.pdf",
+    "title": "Readers' Guide - Real-Time Final Market LMPs report",
+    "url": "https://docs.misoenergy.org/marketreports/Real-Time%20Final%20Market%20LMPs_MISO%20Pricing%20Reports%20Readers%20Guide.pdf"
+  },
+  {
+    "file": "readers-guide-day-ahead-pricing.pdf",
+    "title": "Readers' Guide - Day-Ahead Pricing report",
+    "url": "https://docs.misoenergy.org/marketreports/Day-Ahead%20Pricing_Day-Ahead%20Pricing%20Report%20Readers%20Guide.pdf"
+  },
+  {
+    "file": "readers-guide-generation-fuel-mix.pdf",
+    "title": "Readers' Guide - Generation Fuel Mix report",
+    "url": "https://docs.misoenergy.org/marketreports/Generation%20Fuel%20Mix%20Readers%20Guide.pdf"
+  },
+  {
+    "file": "at-a-glance-the-miso-model.pdf",
+    "title": "At a Glance - The MISO Model",
+    "url": "https://www.misoenergy.org/meet-miso/media-center/",
+    "fetch": "https://cdn.misoenergy.org/At%20a%20Glance%20Summary%20-%20The%20MISO%20Model759368.pdf"
+  },
+  {
+    "file": "at-a-glance-speed-of-interconnection.pdf",
+    "title": "At a Glance - Speed-to-Power Interconnections",
+    "url": "https://www.misoenergy.org/meet-miso/media-center/",
+    "fetch": "https://cdn.misoenergy.org/At%20a%20Glance%20Summary%20-%20Speed%20of%20Interconnection759372.pdf"
+  },
+  {
+    "file": "reliability-imperative-2026-summary.pdf",
+    "title": "2026 Reliability Imperative - summary",
+    "url": "https://cdn.misoenergy.org/2026%20Reliability%20Imperative%20Summary744321.pdf"
+  }
+]

@@ -11,6 +11,7 @@ llama-index
 llama-index-core
 llama-index-vector-stores-chroma
 llama-index-embeddings-huggingface
+llama-index-readers-file  # PDF loading for the doc lane (brings pypdf)
 chromadb
 sentence-transformers<5
 transformers<5
