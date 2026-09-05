@@ -62,11 +62,14 @@ def upsert_single_endpoint(filename: str, doc_id: str,
     collection = get_chroma_collection()
     index = get_index()
 
-    # NEVER APPEND - delete the old snapshot first, or search returns stale copies
+    # The rows this write replaces, captured BEFORE inserting so the delete
+    # below can name them exactly. LlamaIndex mints a fresh uuid per node, so
+    # there is no stable row id to upsert against - this is how we get one.
     try:
-        collection.delete(where={"doc_id": doc_id})
+        stale_ids = collection.get(where={"doc_id": doc_id}).get("ids", [])
     except Exception as err:
-        log.debug("No previous entry to delete for %s (%s)", doc_id, err)
+        log.debug("Could not list previous entries for %s (%s)", doc_id, err)
+        stale_ids = []
 
     # no chunking - snapshots are already one small paragraph
     doc = Document(
@@ -83,6 +86,19 @@ def upsert_single_endpoint(filename: str, doc_id: str,
     )
 
     index.insert(doc)
+
+    # NEVER APPEND - evict the rows just replaced. Insert first, delete second:
+    # deleting first leaves a window where a question retrieves no snapshot at
+    # all, and the poller now writes every 5 minutes rather than once at boot.
+    # This way the window holds a duplicate instead, which the retriever
+    # already collapses by endpoint. A failed insert above deletes nothing, so
+    # the old snapshot survives rather than the endpoint going dark.
+    if stale_ids:
+        try:
+            collection.delete(ids=stale_ids)
+        except Exception as err:
+            log.warning("Could not evict previous entries for %s (%s)",
+                        doc_id, err)
     log.info("Upserted snapshot '%s' (as of %s)", doc_id, as_of)
     return True
 
