@@ -20,29 +20,7 @@ with a source link, sourced from MISO's own public data.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    subgraph FEED["EVERY 5 MINUTES"]
-        POLL["Poller"] --> MISOAPI["MISO Public APIs<br/>(fuel mix, load, wind/solar)"]
-        MISOAPI --> RAW[("raw JSON<br/>on disk")]
-        RAW --> SUMM["rewritten as<br/>plain English"]
-        SUMM --> DB[("Chroma<br/>vector DB")]
-    end
-
-    subgraph ASK["WHEN YOU ASK"]
-        USER(["User"]) --> UI["Chat widget"]
-        UI --> API["FastAPI"]
-        API --> DB2["search Chroma<br/>for matching data"]
-        DB2 --> CLAUDE["Claude writes the answer<br/>from that data"]
-        CLAUDE -. "answer + 'as of 6:55 PM'<br/>+ source link" .-> USER
-        CACHE["answer cache<br/>(maybe, later)"]:::maybe
-        API -.-> CACHE
-    end
-
-    DB --- DB2
-
-    classDef maybe fill:#f1f3f5,stroke:#adb5bd,color:#495057,stroke-dasharray: 5 5
-```
+![MISO Copilot architecture](docs/architecture.svg)
 
 The key design choice: **we never call MISO's API at question time.** A background
 poller keeps a fresh local copy, and questions are answered from that copy. If MISO's

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="600" viewBox="0 0 1160 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#087CC1"/>
+    </marker>
+    <marker id="arrowg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3E8814"/>
+    </marker>
+    <marker id="arrowm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ADB5BD"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1160" height="600" fill="#FFFFFF"/>
+
+  <!-- lane 1: background feed -->
+  <rect x="40" y="60" width="780" height="170" rx="12" fill="#F6F9FB" stroke="#DCE5EB"/>
+  <text x="60" y="90" font-size="12" font-weight="600" letter-spacing="1.5" fill="#526575">EVERY 5 MINUTES &#8212; BACKGROUND FEED</text>
+
+  <rect x="70" y="120" width="170" height="64" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="155" y="148" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">MISO Public APIs</text>
+  <text x="155" y="168" font-size="11.5" fill="#526575" text-anchor="middle">free JSON, no auth</text>
+
+  <rect x="290" y="120" width="150" height="64" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="365" y="148" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">Poller</text>
+  <text x="365" y="168" font-size="11.5" fill="#526575" text-anchor="middle">rate-guarded fetch</text>
+
+  <rect x="490" y="120" width="180" height="64" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="580" y="148" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">Plain-English rewrite</text>
+  <text x="580" y="168" font-size="11.5" fill="#526575" text-anchor="middle">JSON &#8594; prose</text>
+
+  <line x1="240" y1="152" x2="286" y2="152" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="440" y1="152" x2="486" y2="152" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="670" y1="152" x2="870" y2="205" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Chroma DB cylinder -->
+  <path d="M 880 200 L 880 350 A 100 22 0 0 0 1080 350 L 1080 200" fill="#EDF6FB" stroke="#087CC1" stroke-width="1.5"/>
+  <ellipse cx="980" cy="200" rx="100" ry="22" fill="#EDF6FB" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="980" y="262" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">Chroma</text>
+  <text x="980" y="282" font-size="11.5" fill="#526575" text-anchor="middle">local vector DB</text>
+  <text x="980" y="299" font-size="11.5" fill="#526575" text-anchor="middle">fresh MISO snapshots</text>
+
+  <!-- lane 2: question time -->
+  <rect x="40" y="330" width="780" height="210" rx="12" fill="#F6F9FB" stroke="#DCE5EB"/>
+  <text x="60" y="360" font-size="12" font-weight="600" letter-spacing="1.5" fill="#526575">WHEN YOU ASK</text>
+
+  <rect x="70" y="375" width="110" height="60" rx="30" fill="#092A47"/>
+  <text x="125" y="410" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="middle">User</text>
+
+  <rect x="220" y="375" width="150" height="60" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="295" y="400" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">Chat widget</text>
+  <text x="295" y="420" font-size="11.5" fill="#526575" text-anchor="middle">React &#183; Streamlit backup</text>
+
+  <rect x="410" y="375" width="120" height="60" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="470" y="400" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">FastAPI</text>
+  <text x="470" y="420" font-size="11.5" fill="#526575" text-anchor="middle">/ask</text>
+
+  <rect x="570" y="375" width="160" height="60" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
+  <text x="650" y="400" font-size="15" font-weight="600" fill="#122B40" text-anchor="middle">Claude</text>
+  <text x="650" y="420" font-size="11.5" fill="#526575" text-anchor="middle">writes the answer</text>
+
+  <line x1="180" y1="405" x2="216" y2="405" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="370" y1="405" x2="406" y2="405" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="530" y1="405" x2="566" y2="405" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- retrieval arrows -->
+  <line x1="500" y1="375" x2="877" y2="333" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="670" y="342" font-size="11.5" fill="#526575" text-anchor="middle">search by meaning</text>
+  <line x1="893" y1="368" x2="717" y2="373" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- answer path back to user -->
+  <path d="M 650 435 C 650 505 210 505 130 440" fill="none" stroke="#3E8814" stroke-width="1.5" stroke-dasharray="7 5" marker-end="url(#arrowg)"/>
+  <text x="400" y="520" font-size="12.5" font-weight="600" fill="#3E8814" text-anchor="middle">answer &#183; &#8220;as of 6:55 PM EST&#8221; &#183; source link</text>
+
+  <!-- maybe: cache -->
+  <rect x="880" y="428" width="210" height="54" rx="10" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="985" y="451" font-size="13" font-weight="600" fill="#495057" text-anchor="middle">answer cache</text>
+  <text x="985" y="470" font-size="11" fill="#868E96" text-anchor="middle">maybe, later</text>
+  <path d="M 732 428 C 790 445 820 452 874 455" fill="none" stroke="#ADB5BD" stroke-width="1.5" stroke-dasharray="2 4" marker-end="url(#arrowm)"/>
+
+  <text x="580" y="580" font-size="13" fill="#526575" text-anchor="middle">No live MISO calls at question time &#8212; answers come from the local copy and always say how fresh they are.</text>
+</svg>

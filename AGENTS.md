@@ -162,8 +162,9 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - Keep `requirements.txt` honest: dependencies stay commented out until the code
   that imports them lands.
 - Docstrings state what a module does and what's stubbed/pending (see `app.py`).
-- If you change the architecture picture, update both `docs/architecture.excalidraw`
-  (source) and `docs/arch-v1.png` (render), plus the mermaid diagram in `README.md`.
+- If you change the architecture picture, update `docs/architecture.svg` (the
+  hand-edited SVG the README embeds) plus the `docs/architecture.excalidraw` /
+  `docs/arch-v1.png` pair.
 - Update `README.md` when the remaining planned pieces (doc corpus in data/docs/, poller-to-Chroma resync) become real.
 - Tests live in `tests/`, named for the behavior they protect rather than the
   function they call. Where a test exists because of a bug that actually
