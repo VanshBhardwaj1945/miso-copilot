@@ -280,8 +280,15 @@ def test_a_failing_resync_is_not_reported_as_a_failed_poll(monkeypatch,
 def _stub_rag_lane(monkeypatch, results):
     """Make the lazy `from backend.rag.ingest_api import ...` resolve to a stub."""
     module = types.ModuleType("backend.rag.ingest_api")
-    module.sync_raw_snapshots = lambda: results
+    module.calls = []
+
+    def sync_raw_snapshots(raw_dir=None):
+        module.calls.append(raw_dir)
+        return results
+
+    module.sync_raw_snapshots = sync_raw_snapshots
     monkeypatch.setitem(sys.modules, "backend.rag.ingest_api", module)
+    return module
 
 
 def test_resync_rag_reports_a_complete_sync_at_info(monkeypatch, caplog):
@@ -302,6 +309,16 @@ def test_resync_rag_names_the_files_that_did_not_sync(monkeypatch, caplog):
     rendered = warnings[0].getMessage()
     assert "1 of 2" in rendered
     assert "Snapshot.json" in rendered
+
+
+def test_resync_rag_reads_the_directory_the_poller_wrote(monkeypatch, raw):
+    # MISO_RAW_DIR moves the poller's output. Ingesting the default data/raw/
+    # instead would re-feed Chroma stale snapshots every cycle while
+    # _status.json looked healthy - one of the demo-day hazards the poller
+    # README names.
+    module = _stub_rag_lane(monkeypatch, {"FuelMix.json": True})
+    REAL_RESYNC()
+    assert module.calls == [raw]
 
 
 # --- start_scheduler --------------------------------------------------------

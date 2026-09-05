@@ -94,7 +94,10 @@ def resync_rag() -> None:
     """
     from backend.rag.ingest_api import sync_raw_snapshots
 
-    results = sync_raw_snapshots()
+    # core.raw_dir(), not the RAG lane's default: MISO_RAW_DIR moves where the
+    # poll just wrote, and feeding Chroma from data/raw/ instead would quietly
+    # re-ingest stale snapshots every cycle while the status file looked fine.
+    results = sync_raw_snapshots(core.raw_dir())
     synced = sum(1 for ok in results.values() if ok)
     if synced == len(results):
         log.info("Chroma re-synced from %d snapshot files", synced)

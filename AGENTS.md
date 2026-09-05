@@ -171,7 +171,7 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - If you change the architecture picture, update `docs/architecture.svg` (the
   simple one the README embeds) and `docs/architecture-detailed.svg` (plus its
   PNG render) - both are hand-edited SVG.
-- Update `README.md` when the remaining planned pieces (doc corpus in data/docs/, poller-to-Chroma resync) become real.
+- Update `README.md` when the remaining planned piece (doc corpus in data/docs/) becomes real.
 - Tests live in `tests/`, named for the behavior they protect rather than the
   function they call. Where a test exists because of a bug that actually
   happened, say so in a line above it - that is what stops someone deleting it

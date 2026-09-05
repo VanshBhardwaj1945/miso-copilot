@@ -27,7 +27,8 @@ Want the full picture? A more detailed version lives in
 ([PNG](docs/architecture-detailed.png)).
 
 The key design choice: **we never call MISO's API at question time.** A background
-poller keeps a fresh local copy, and questions are answered from that copy. If MISO's
+poller keeps a fresh local copy - every five minutes it refetches, then re-indexes
+what it fetched - and questions are answered from that copy. If MISO's
 API goes down mid-demo, the app keeps answering - it just says how old its data is
 ("as of 6:55 PM EST") right in the answer. Every answer links its source, because for
 "where do I find X" questions, the link *is* the product. And the poller is hard-limited
@@ -73,7 +74,7 @@ the 5-minute poller. Ask the widget "what's the current fuel mix?" and you'll ge
 grid numbers with a chart, an "as of" time, and a source link. (No API key? The backend
 returns a graceful handoff to MISO's contact form instead of an error.)
 
-Backup UI: `streamlit run app.py`. Tests: `pytest` (627 tests on the poller, 100%
+Backup UI: `streamlit run app.py`. Tests: `pytest` (634 tests on the poller, 100%
 branch coverage).
 
 ## Repo layout
@@ -103,9 +104,6 @@ For contributor rules and the full architecture constraints, see
   - holds recent question &rarr; answer pairs in memory
   - checks the cache before calling Claude
   - clears itself whenever the poller brings fresh data
-- **Auto-refresh the vector DB after each poll** - today it only syncs at boot.
-  - poller finishes a cycle &rarr; calls the same sync that runs at startup
-  - one line in the poller, no new pieces
 - **Document search** - the machinery for "where do I find X report?" is built
   and waiting on documents.
   - put MISO PDFs / key pages into `data/docs/`
