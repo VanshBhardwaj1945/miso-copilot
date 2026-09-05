@@ -12,7 +12,7 @@ from backend.rag.retriever import search_docs
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY) if CLAUDE_API_KEY else None
 
 # Set to True to force Mock Mode, or False to use your real Claude API key
-FORCE_MOCK = True
+FORCE_MOCK = False
 
 def answer_question(question: str) -> tuple[str, list[dict]]:
     """Retrieve context from Chroma and answer via Claude (or Mock Mode)."""

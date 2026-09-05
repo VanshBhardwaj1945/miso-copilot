@@ -4,9 +4,10 @@ Transform raw MISO JSON payloads into plain-English
 
 from typing import Any
 
+# old "real-time-displays" page 404s now; MISO moved it here (checked 2026-09-05)
 MISO_DISPLAY_URL = (
     "https://www.misoenergy.org/markets-and-operations/"
-    "real-time--market-data/real-time-displays/"
+    "real-time--market-data/markets-displays/"
 )
 
 
@@ -39,7 +40,8 @@ def transform_fuelmix(data: dict) -> tuple[str, str, str]:
     ]
 
     for item in fuels:
-        category = item.get("FUEL_CATEGORY") or item.get("CATEGORY") or "Unknown"
+        # CATEGORY is the clean name; FUEL_CATEGORY has the MW baked into the text
+        category = item.get("CATEGORY") or item.get("FUEL_CATEGORY") or "Unknown"
         act_mw = _safe_float(item.get("ACT", 0))
         pct = (act_mw / total_mw * 100.0) if total_mw > 0 else 0.0
         lines.append(f"- {category}: {act_mw:,.0f} MW ({pct:.1f}%)")
