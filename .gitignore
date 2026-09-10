@@ -8,7 +8,8 @@ __pycache__/
 venv/
 
 # local data stores
-data/
+data/chroma
+data/raw
 chroma_db/
 *.sqlite
 *.db
