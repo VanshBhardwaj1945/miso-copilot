@@ -54,6 +54,11 @@ POLLER_ENV_VARS = (
     "MISO_RAW_DIR",
     "MISO_POLL_SECONDS",
     "MISO_POLLER_ENABLED",
+    # A real key in .env would otherwise register the Data Exchange endpoint and
+    # break every test that assumes the legacy four - and the spec tells people
+    # to put one there.
+    "MISO_API_KEY",
+    "MISO_DATA_EXCHANGE_BASE",
 )
 
 

@@ -152,16 +152,28 @@ _FUEL_NAMES = {
 }
 
 
-def _latest_row_per_region(rows: list) -> dict:
-    """The most recent row for each region.
+def _row_time(row: dict) -> str:
+    """The row's interval, as a sortable string. Missing sorts oldest."""
+    interval = row.get("timeInterval") or {}
+    return str(interval.get("start") or interval.get("value") or "")
 
-    A day's fetch holds every interval, and only the newest is "right now".
-    Rows arrive in interval order, so the last one for a region wins.
+
+def _latest_row_per_region(rows: list) -> dict:
+    """The newest row for each region.
+
+    A day's fetch holds every interval and only the newest is "right now", so
+    this compares timeInterval rather than trusting the order rows arrive in.
+    MISO does not document that ordering anywhere, and taking the last row on
+    faith would silently report the oldest interval of the day as current if
+    the API ever returned newest-first.
     """
-    latest = {}
+    latest: dict = {}
     for row in rows:
-        if isinstance(row, dict) and row.get("region"):
-            latest[str(row["region"]).upper()] = row
+        if not isinstance(row, dict) or not row.get("region"):
+            continue
+        code = str(row["region"]).upper()
+        if code not in latest or _row_time(row) >= _row_time(latest[code]):
+            latest[code] = row
     return latest
 
 
@@ -184,8 +196,12 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
              f"Exchange API (as of {as_of} EST):" if as_of else
              "MISO generation by fuel type and region, from the MISO Data Exchange API:"]
 
-    # MISO first when present - it is the footprint total the others sum toward
-    order = [r for r in ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION") if r in latest]
+    # MISO first when present - it is the footprint total the others sum toward.
+    # Anything MISO adds to the enum later is appended rather than dropped: a
+    # region silently missing from an answer is worse than one with an
+    # unpolished name.
+    known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
+    order = [r for r in known if r in latest] + sorted(set(latest) - set(known))
     for code in order:
         row = latest[code]
         total = _safe_float(row.get("totalMw"))

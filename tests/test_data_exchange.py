@@ -76,10 +76,15 @@ def test_no_key_sends_no_key_header(no_key):
     assert "Ocp-Apim-Subscription-Key" not in core._headers_for(de)
 
 
-def test_env_key_beats_the_dotenv_value(monkeypatch):
-    monkeypatch.setattr(core.config, "MISO_API_KEY", "from-dotenv")
-    monkeypatch.setenv("MISO_API_KEY", "from-env")
-    assert core.data_exchange_key() == "from-env"
+def test_the_key_comes_from_the_environment_only(monkeypatch):
+    """config.MISO_API_KEY is captured at import; reading it too would
+    resurrect a key the environment has cleared, which is how a configured
+    .env silently broke eight unrelated tests."""
+    monkeypatch.setattr(core.config, "MISO_API_KEY", "stale-import-time-value")
+    monkeypatch.delenv("MISO_API_KEY", raising=False)
+    assert core.data_exchange_key() is None
+    monkeypatch.setenv("MISO_API_KEY", "live")
+    assert core.data_exchange_key() == "live"
 
 
 # --- base URL and {date} -------------------------------------------------
@@ -140,6 +145,12 @@ def test_a_single_page_is_returned_whole(monkeypatch):
     assert json.loads(result["content"])["data"] == ROWS
 
 
+@pytest.fixture(autouse=True)
+def no_page_pause(monkeypatch):
+    """Pages are paced 2s apart in production; tests must not wait."""
+    monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 0)
+
+
 def test_pages_are_followed_and_concatenated(monkeypatch):
     pages = [ok(page([{"region": "North"}], last=False)),
              ok(page([{"region": "Central"}], last=False)),
@@ -193,6 +204,42 @@ def test_an_assembled_payload_still_passes_the_shape_gate(monkeypatch):
 
 
 # --- page URLs -----------------------------------------------------------
+
+def test_absent_paging_metadata_fails_rather_than_assuming_completion(monkeypatch):
+    """A page with no lastPage is malformed, not finished.
+
+    Treating it as finished would store page one as though it were the whole
+    day - the silent truncation this whole function exists to prevent.
+    """
+    monkeypatch.setattr(core, "_fetch",
+                        lambda e, u: ok({"data": [{"region": "North"}], "page": {}}))
+    result = core._fetch_all_pages(core.DATA_EXCHANGE_ENDPOINTS[0], "https://x/f")
+    assert result["ok"] is False
+    assert result["error"] == "paging metadata missing"
+
+
+def test_a_response_with_no_page_object_at_all_also_fails(monkeypatch):
+    monkeypatch.setattr(core, "_fetch",
+                        lambda e, u: ok({"data": [{"region": "North"}]}))
+    assert core._fetch_all_pages(core.DATA_EXCHANGE_ENDPOINTS[0],
+                                 "https://x/f")["ok"] is False
+
+
+def test_pages_are_paced_apart(monkeypatch):
+    """One guard lease covers the endpoint, so pacing between pages is ours.
+
+    MISO allows about one request per minute to a link; firing pages
+    back-to-back inside a single lease is how that gets breached.
+    """
+    monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 7)
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    pages = [ok(page([{"region": "North"}], last=False)),
+             ok(page([{"region": "South"}], last=True))]
+    monkeypatch.setattr(core, "_fetch", lambda e, u: pages[len(slept)])
+    core._fetch_all_pages(core.DATA_EXCHANGE_ENDPOINTS[0], "https://x/f")
+    assert slept == [7]      # paused before page 2, not before page 1
+
 
 def test_page_parameters_are_appended():
     url = core._page_url("https://x/fuel-type", 2)

@@ -64,6 +64,9 @@ DATA_EXCHANGE = "data_exchange"
 DE_PAGE_SIZE = 5000
 # Hard stop, so a server that never sets lastPage cannot loop or fill the disk.
 DE_MAX_PAGES = 5
+# One guard lease covers the endpoint, not each page, so the pacing between
+# pages is ours to enforce.
+DE_PAGE_PAUSE_SECONDS = 2
 
 DEFAULT_POLL_SECONDS = 300
 MIN_POLL_SECONDS = 5
@@ -141,8 +144,14 @@ DATA_EXCHANGE_ENDPOINTS = [
 
 
 def data_exchange_key() -> str | None:
-    """The subscription key, or None. Read per call so tests can set it late."""
-    return os.environ.get("MISO_API_KEY") or config.MISO_API_KEY
+    """The subscription key, or None.
+
+    os.environ only, deliberately: backend.config's .env loader uses
+    os.environ.setdefault, so a key in .env is already here. Reading
+    config.MISO_API_KEY as well would resurrect a value the environment has
+    since cleared - which broke test isolation exactly once.
+    """
+    return os.environ.get("MISO_API_KEY")
 
 
 def active_endpoints() -> list[Endpoint]:
@@ -567,19 +576,31 @@ def _fetch_all_pages(endpoint: Endpoint, url: str) -> dict:
 
     Each extra page is another request to the same link, and MISO allows about
     one per endpoint per minute. DE_PAGE_SIZE is deliberately large so the
-    common case is a single request; a truncated fetch is recorded as a
-    failure rather than passed off as complete.
+    common case is a single request, and pages are paced apart. A truncated
+    fetch is recorded as a failure rather than passed off as complete - that
+    includes a response whose paging metadata is missing, which is malformed
+    rather than finished.
     """
     rows: list = []
     page_meta: dict = {}
     for page_number in range(1, DE_MAX_PAGES + 1):
+        if page_number > 1:
+            # One guard lease covers the whole endpoint, so pacing here is what
+            # keeps a multi-page cycle from firing back-to-back requests at a
+            # link MISO limits to about one per minute.
+            time.sleep(DE_PAGE_PAUSE_SECONDS)
         result = _fetch(endpoint, _page_url(url, page_number))
         if not result["ok"]:
             return result
         body = json.loads(result["content"])
         rows.extend(body.get("data") or [])
         page_meta = body.get("page") or {}
-        if page_meta.get("lastPage", True):
+        # An absent lastPage is malformed, not "you're done". Assuming done
+        # would store page one as though it were the whole day - the exact
+        # silent truncation this function exists to prevent.
+        if not isinstance(page_meta.get("lastPage"), bool):
+            return _fetch_failure("paging metadata missing")
+        if page_meta["lastPage"]:
             break
     else:
         # ran out of pages without lastPage: better to fail loudly than to
