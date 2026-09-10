@@ -145,7 +145,7 @@ def test_the_source_url_is_the_operation_that_produced_it():
 # --- the generic region transformer ---------------------------------------
 
 from backend.rag.transformers import (  # noqa: E402
-    _numeric_summary,
+    _measures,
     make_de_transformer,
 )
 
@@ -182,12 +182,69 @@ def test_a_nested_fuel_breakdown_is_flattened():
     assert "total 26,858 MW" in prose
 
 
-def test_bookkeeping_fields_are_not_reported_as_megawatts():
-    """region/interval/init are row metadata; printing them as MW would be
-    confidently wrong rather than merely untidy."""
-    summary = _numeric_summary({"region": "NORTH", "interval": "24", "init": "5",
-                                "localResourceZone": "LRZ1", "load": 100.0})
-    assert summary == "load 100 MW"
+def test_only_known_measurements_are_reported():
+    """region/interval/init are row bookkeeping. An unknown field is skipped
+    rather than guessed at - inventing a unit is how "units 2 MW" happened."""
+    assert _measures({"region": "NORTH", "interval": "24", "init": "5",
+                      "load": 100.0, "somethingNew": 7}) == "load 100 MW"
+
+
+def test_a_count_is_not_reported_in_megawatts():
+    """unitCount is a number of generators. Printing "units 2 MW" is a
+    confidently wrong figure, which is worse than a missing one."""
+    assert _measures({"unitCount": 2}) == "units 2"
+
+
+def test_a_boolean_is_never_a_quantity():
+    """peak is a flag; it rendered as "peak 0 MW" before."""
+    assert _measures({"peak": False, "load": 5.0}) == "load 5 MW"
+
+
+def test_the_fuel_on_the_margin_names_the_fuel():
+    """The whole point of that endpoint. fuelType was being skipped, so every
+    region reported a count with no indication of which fuel it counted."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, _, _ = fn({"data": [
+        de_row("NORTH", fuelType="Coal", unitCount=1),
+        de_row("NORTH", fuelType="Gas", unitCount=2),
+    ]})
+    assert "Coal (units 1)" in prose and "Gas (units 2)" in prose
+    assert "MW" not in prose.split("MISO North")[1].split("\n")[0]
+
+
+def test_rows_sharing_a_region_are_all_kept():
+    """Keeping one row per region answered "which fuel is on the margin?" with
+    a single arbitrary fuel."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", fuelType=f, unitCount=1)
+                               for f in ("Coal", "Gas", "Nuclear")]})
+    for fuel in ("Coal", "Gas", "Nuclear"):
+        assert fuel in prose
+
+
+def test_a_local_resource_zone_is_kept_as_a_label():
+    """The forecast carries a zone per row; dropping it collapsed nine zones
+    into one arbitrary number per region."""
+    fn = make_de_transformer("load forecast", URL)
+    prose, _, _ = fn({"data": [
+        de_row("NORTH", localResourceZone="Z1", loadForecast=11045.0),
+        de_row("NORTH", localResourceZone="Z3", loadForecast=6745.0),
+    ]})
+    assert "Z1 (load forecast 11,045 MW)" in prose
+    assert "Z3 (load forecast 6,745 MW)" in prose
+
+
+def test_older_intervals_do_not_leak_in():
+    """Only the newest interval's rows, even though several rows share it."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, as_of, _ = fn({"data": [
+        de_row("NORTH", when="2026-09-09T01:00:00", fuelType="Oil", unitCount=9),
+        de_row("NORTH", when="2026-09-09T23:00:00", fuelType="Coal", unitCount=1),
+        de_row("NORTH", when="2026-09-09T23:00:00", fuelType="Gas", unitCount=2),
+    ]})
+    assert "Oil" not in prose
+    assert "Coal" in prose and "Gas" in prose
+    assert as_of == "2026-09-09T23:00:00"
 
 
 def test_the_newest_interval_wins_here_too():
@@ -197,6 +254,7 @@ def test_the_newest_interval_wins_here_too():
         de_row("NORTH", when="2026-09-09T23:00:00", load=999.0),
     ]})
     assert "load 999 MW" in prose
+    assert "load 1 MW" not in prose
     assert as_of == "2026-09-09T23:00:00"
 
 

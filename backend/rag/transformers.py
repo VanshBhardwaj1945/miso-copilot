@@ -242,29 +242,44 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
 # --- the rest of the region-capable Data Exchange endpoints -----------------
 
 # Every one of these returns rows of {timeInterval, region, ...values}, but the
-# value fields differ per endpoint - load, nsi, supply, mustRun/economic/
-# emergency, and so on. Rather than eleven near-identical transformers, one
-# generic one reports whatever numeric fields a row carries, with labels a
-# person would recognize.
-_FIELD_LABELS = {
-    "load": "load", "nsi": "net scheduled interchange", "supply": "cleared supply",
-    "fixed": "fixed demand", "priceSens": "price-sensitive demand",
-    "virtual": "virtual demand", "mustRun": "must-run", "economic": "economic",
-    "emergency": "emergency", "loadForecast": "load forecast",
-    "unitCount": "units", "peak": "peak", "totalMw": "total",
+# value fields differ per endpoint. Rather than eleven near-identical
+# transformers, one generic one - which means it has to know what each field
+# actually IS. A count or a boolean printed as megawatts is a confidently wrong
+# number, which is worse than a missing one.
+#
+# label, unit. An empty unit means the number is not a measurement in MW.
+_MEASURES = {
+    "load": ("load", "MW"),
+    "nsi": ("net scheduled interchange", "MW"),
+    "supply": ("cleared supply", "MW"),
+    "fixed": ("fixed demand", "MW"),
+    "priceSens": ("price-sensitive demand", "MW"),
+    "virtual": ("virtual demand", "MW"),
+    "mustRun": ("must-run", "MW"),
+    "economic": ("economic", "MW"),
+    "emergency": ("emergency", "MW"),
+    "loadForecast": ("load forecast", "MW"),
+    "totalMw": ("total", "MW"),
+    "unitCount": ("units", ""),          # a count of generators, not megawatts
 }
-_SKIP_FIELDS = {"region", "interval", "init", "localResourceZone", "fuelType"}
+
+# Fields that say which slice a row describes rather than how much of anything.
+# They become part of the row's label; they are never printed as quantities.
+_DIMENSIONS = ("fuelType", "localResourceZone")
+
+# Row bookkeeping with no meaning in an answer.
+_IGNORED = {"region", "interval", "init", "timeInterval", "peak"}
 
 
-def _humanize(field: str) -> str:
-    return _FIELD_LABELS.get(field, field)
+def _measures(row: dict) -> str:
+    """The row's actual measurements, as "label 1,234 MW" phrases.
 
-
-def _numeric_summary(row: dict) -> str:
-    """The row's numeric fields as "label 1,234 MW" phrases."""
+    Only fields in _MEASURES are reported. An unknown field is skipped rather
+    than guessed at: inventing a unit for it is how "units 2 MW" happened.
+    """
     parts = []
     for key, value in row.items():
-        if key in _SKIP_FIELDS or key == "timeInterval":
+        if key in _IGNORED or key in _DIMENSIONS:
             continue
         if key == "fuelTypes" and isinstance(value, dict):
             for fuel, mw in value.items():
@@ -272,10 +287,37 @@ def _numeric_summary(row: dict) -> str:
                 if amount > 0:
                     parts.append(f"{_FUEL_NAMES.get(fuel, fuel)} {amount:,.0f} MW")
             continue
-        if isinstance(value, (int, float)) or (
-                isinstance(value, str) and value.replace(".", "", 1).lstrip("-").isdigit()):
-            parts.append(f"{_humanize(key)} {_safe_float(value):,.0f} MW")
+        if isinstance(value, bool) or key not in _MEASURES:
+            continue
+        label, unit = _MEASURES[key]
+        amount = _safe_float(value)
+        parts.append(f"{label} {amount:,.0f} {unit}".rstrip())
     return ", ".join(parts)
+
+
+def _dimension_label(row: dict) -> str:
+    """What distinguishes this row from its siblings in the same region."""
+    return ", ".join(str(row[d]) for d in _DIMENSIONS if row.get(d))
+
+
+def _rows_by_region_at_latest_interval(rows: list) -> dict:
+    """Every row for each region at that region's newest interval.
+
+    Not one row per region: fuel-on-the-margin carries a row per fuel, and
+    keeping only one silently answered "which fuel is on the margin?" with a
+    single arbitrary fuel.
+    """
+    newest: dict = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("region"):
+            continue
+        code = str(row["region"]).upper()
+        when = _row_time(row)
+        if code not in newest or when > newest[code][0]:
+            newest[code] = (when, [])
+        if when == newest[code][0]:
+            newest[code][1].append(row)
+    return newest
 
 
 def make_de_transformer(title: str, doc_url: str):
@@ -287,13 +329,11 @@ def make_de_transformer(title: str, doc_url: str):
     """
     def transform(data: dict) -> tuple[str, str, str]:
         rows = data.get("data") if isinstance(data, dict) else None
-        latest = _latest_row_per_region(rows or [])
+        latest = _rows_by_region_at_latest_interval(rows or [])
         if not latest:
             return (f"No MISO Data Exchange data is available for {title}.", "", doc_url)
 
-        sample = next(iter(latest.values()))
-        interval = sample.get("timeInterval") or {}
-        as_of = str(interval.get("start") or interval.get("end") or "").strip()
+        as_of = max((when for when, _ in latest.values()), default="")
 
         lines = [f"MISO {title} by region for the completed market day, from the "
                  f"MISO Data Exchange API"
@@ -302,8 +342,19 @@ def make_de_transformer(title: str, doc_url: str):
         known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
         order = [r for r in known if r in latest] + sorted(set(latest) - set(known))
         for code in order:
-            summary = _numeric_summary(latest[code])
+            _, rows_here = latest[code]
             name = _REGION_NAMES.get(code, code)
-            lines.append(f"- {name}: {summary}." if summary else f"- {name}: no values reported.")
+            described = []
+            for row in rows_here:
+                measures = _measures(row)
+                dimension = _dimension_label(row)
+                if dimension and measures:
+                    described.append(f"{dimension} ({measures})")
+                elif dimension:
+                    described.append(dimension)
+                elif measures:
+                    described.append(measures)
+            lines.append(f"- {name}: {'; '.join(described)}." if described
+                         else f"- {name}: no values reported.")
         return "\n".join(lines), as_of, doc_url
     return transform
