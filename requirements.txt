@@ -12,7 +12,6 @@ llama-index-core
 llama-index-vector-stores-chroma
 llama-index-embeddings-huggingface
 llama-index-readers-file  # PDF loading for the doc lane (brings pypdf)
-defusedxml  # build_site_index parses MISO's sitemap; stdlib ElementTree expands entities
 chromadb
 sentence-transformers<5
 transformers<5

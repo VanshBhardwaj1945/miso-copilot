@@ -6,9 +6,11 @@ doc lane can retrieve from, so the answer carries a real URL instead of a guess.
 
 Run:  python -m backend.rag.build_site_index
 
-One request, for https://www.misoenergy.org/sitemap.xml - a file MISO publishes
-for exactly this purpose. That is not crawling, and the URL list it returns is
-NOT a license to fetch those pages: miso.org bans scrapers (see AGENTS.md).
+Reads a local export of MISO's published sitemap - data/docs/misoenergy-sitemap.txt,
+saved by hand. This module makes no network requests at all, and the URL list it
+reads is NOT a license to fetch those pages: miso.org bans scrapers (see
+AGENTS.md). Only the page names are used, derived from the URL paths; no page is
+ever visited.
 
 Most of the sitemap is not worth indexing: events and stakeholder engagement
 are 86 percent of its 2,595 URLs, and a meeting page from 2023 is never the
@@ -22,19 +24,16 @@ from a clone rather than a build step they have to remember.
 
 import datetime
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import requests
-# defusedxml, not stdlib ElementTree: this parses XML fetched over the network,
-# and the stdlib parser expands entities (billion laughs, external refs).
-from defusedxml.ElementTree import fromstring as xml_fromstring
-
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SITEMAP_PATH = REPO_ROOT / "data" / "docs" / "misoenergy-sitemap.txt"
 SITEMAP_URL = "https://www.misoenergy.org/sitemap.xml"
 SITE_HOST = "misoenergy.org"
 OUT_PATH = Path(__file__).resolve().parent / "site_index.md"
-TIMEOUT = 30
 
 # One-off content rather than places to send someone - see the docstring.
 DROP_SECTIONS = {"events", "engage", "extranet", "account", "manage",
@@ -62,15 +61,20 @@ ACRONYMS = {
 }
 
 
-def fetch_sitemap(url: str = SITEMAP_URL) -> list[str]:
-    """Every <loc> in MISO's sitemap. One polite request."""
-    resp = requests.get(url, timeout=TIMEOUT,
-                        headers={"User-Agent": "miso-ramen/1.0 (site index builder)"})
-    resp.raise_for_status()
-    root = xml_fromstring(resp.content)
-    # the sitemap namespace is declared on the root; match on the tag's suffix
-    return [el.text.strip() for el in root.iter()
-            if el.tag.endswith("loc") and el.text]
+def read_sitemap(path: Path = SITEMAP_PATH) -> list[str]:
+    """Every URL in the saved sitemap export.
+
+    The file is MISO's sitemap saved to disk: a header, then one URL per line
+    with an optional tab-separated lastmod date. Reading it rather than
+    fetching keeps this module entirely offline, so regenerating the index
+    can never put a request on misoenergy.org.
+    """
+    urls = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        candidate = line.split("\t")[0].strip()
+        if candidate.startswith("http"):
+            urls.append(candidate)
+    return urls
 
 
 def path_parts(url: str) -> list[str]:
@@ -123,7 +127,7 @@ def build(urls: list[str]) -> tuple[str, int]:
         "Use it to send someone to the right page on misoenergy.org.",
         "",
         f"Generated {datetime.date.today():%Y-%m-%d} by backend/rag/build_site_index.py "
-        f"from {SITEMAP_URL} .",
+        f"from a saved copy of {SITEMAP_URL} .",
         "",
         "Each entry is: page name - where it sits - URL.",
         "",
@@ -141,10 +145,13 @@ def build(urls: list[str]) -> tuple[str, int]:
 
 
 def main() -> None:
-    urls = fetch_sitemap()
+    if not SITEMAP_PATH.exists():
+        sys.exit(f"No sitemap export at {SITEMAP_PATH} - save "
+                 f"{SITEMAP_URL} there first.")
+    urls = read_sitemap()
     markdown, count = build(urls)
     OUT_PATH.write_text(markdown, encoding="utf-8")
-    print(f"{len(urls)} URLs in the sitemap -> {count} pages kept")
+    print(f"{len(urls)} URLs in {SITEMAP_PATH.name} -> {count} pages kept")
     print(f"Wrote {OUT_PATH} ({len(markdown) / 1024:.1f} KB)")
     print("Re-run `python -m backend.rag.ingest_docs` (with the backend stopped) "
           "to put it in Chroma.")

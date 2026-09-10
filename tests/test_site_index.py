@@ -8,54 +8,46 @@ actually answer "where do I find X?".
 """
 
 import pytest
+from pathlib import Path
 
 from backend.rag import build_site_index as bsi
 
-SITEMAP_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://www.misoenergy.org/</loc><lastmod>2025-10-08</lastmod></url>
-  <url><loc>https://www.misoenergy.org/markets-and-operations/</loc></url>
-  <url><loc>https://www.misoenergy.org/events/2023-meeting/</loc></url>
-</urlset>"""
+SITEMAP_EXPORT = """MISO sitemap - https://www.misoenergy.org/sitemap.xml
+Retrieved 2026-09-10 | 3 URLs
+======================================================================
+
+https://www.misoenergy.org/\t2025-10-08
+https://www.misoenergy.org/markets-and-operations/\t2026-01-02
+https://www.misoenergy.org/events/2023-meeting/
+not-a-url line that should be ignored
+"""
 
 
-class FakeResponse:
-    def __init__(self, content):
-        self.content = content
+# --- read_sitemap --------------------------------------------------------
 
-    def raise_for_status(self):
-        pass
-
-
-# --- fetch_sitemap -------------------------------------------------------
-
-def test_fetch_sitemap_reads_loc_elements_through_the_namespace(monkeypatch):
-    """The sitemap declares a default namespace, so <loc> is really {ns}loc."""
-    monkeypatch.setattr(bsi.requests, "get", lambda *a, **k: FakeResponse(SITEMAP_XML))
-    urls = bsi.fetch_sitemap()
-    assert urls == [
+def test_the_saved_export_is_read_line_by_line(tmp_path):
+    """The builder reads a saved sitemap rather than fetching one, so
+    regenerating the index can never put a request on misoenergy.org."""
+    path = tmp_path / "sitemap.txt"
+    path.write_text(SITEMAP_EXPORT, encoding="utf-8")
+    assert bsi.read_sitemap(path) == [
         "https://www.misoenergy.org/",
         "https://www.misoenergy.org/markets-and-operations/",
         "https://www.misoenergy.org/events/2023-meeting/",
     ]
 
 
-def test_fetch_sitemap_refuses_an_entity_expansion_bomb(monkeypatch):
-    """defusedxml, not stdlib ElementTree - this parses XML off the network.
+def test_the_lastmod_column_is_discarded(tmp_path):
+    path = tmp_path / "sitemap.txt"
+    path.write_text("https://www.misoenergy.org/planning/\t2026-04-16\n", encoding="utf-8")
+    assert bsi.read_sitemap(path) == ["https://www.misoenergy.org/planning/"]
 
-    Here because bandit B314 caught the stdlib version in review; the stdlib
-    parser expands these happily.
-    """
-    bomb = b"""<?xml version="1.0"?>
-    <!DOCTYPE urlset [
-      <!ENTITY a "aaaaaaaaaa">
-      <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
-    ]>
-    <urlset><url><loc>&b;</loc></url></urlset>"""
-    monkeypatch.setattr(bsi.requests, "get", lambda *a, **k: FakeResponse(bomb))
-    with pytest.raises(Exception) as err:
-        bsi.fetch_sitemap()
-    assert "entit" in str(err.value).lower() or "Entities" in str(err.value)
+
+def test_the_module_makes_no_network_calls():
+    """The point of reading a saved export: nothing here can reach MISO."""
+    source = Path("backend/rag/build_site_index.py").read_text()
+    for forbidden in ("import requests", "urlopen", "httpx", "urlretrieve"):
+        assert forbidden not in source
 
 
 # --- keep ----------------------------------------------------------------

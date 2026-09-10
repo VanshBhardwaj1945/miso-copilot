@@ -167,8 +167,9 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
   IP-banned. Use the public APIs and politely-fetched documents only. The
   document corpus is nine hand-picked URLs in `backend/rag/doc_sources.json`,
   fetched once with a pause between requests - add to the list, never crawl.
-  `site_index.md` lists page URLs taken from MISO's published sitemap: fetching
-  that one file is fine, fetching the pages it lists is the crawl that is not.
+  `site_index.md` lists page URLs read from a saved copy of MISO's published
+  sitemap in `data/docs/`; build_site_index.py makes no network requests at
+  all, and fetching the pages it lists is the crawl that is not.
 - **Rate limit: max ~1 request per endpoint per minute** against
   `https://public-api.misoenergy.org` (free JSON, no auth). The 5-min poller is
   already far under this, and a per-link lease in

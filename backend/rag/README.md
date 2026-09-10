@@ -50,11 +50,13 @@ Chroma + LlamaIndex retrieval layer. Two feeds go in, one search comes out.
   Tracked, like `crosswalk.json`, because it is generated rather than fetched -
   there is no per-file URL for `fetch_docs` to pull.
 - `build_site_index.py` - regenerates that file. One request for MISO's
-  published `sitemap.xml`, then a filter: events and stakeholder engagement are
+  saved `sitemap.xml` export in `data/docs/`, then a filter: events and
+  stakeholder engagement are
   86 percent of the 2,595 URLs and never the answer to "where do I find X?", so
   they go, along with news releases and dated notification posts. That is a
-  sitemap fetch, not a crawl - the URL list it returns is **not** a license to
-  fetch those pages.
+  module makes no network requests at all, and the URL list it reads is **not**
+  a license to fetch those pages - only the page names are used, derived from
+  the URL paths.
 - `transformers.py` also carries `transform_de_fueltype`, for the MISO Data
   Exchange feed. Same contract as the four legacy transformers - JSON in, one
   paragraph out - but the rows are per region, so the paragraph names MISO
