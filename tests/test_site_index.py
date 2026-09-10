@@ -80,6 +80,28 @@ def test_keep_drops_one_off_content(url):
     assert bsi.keep(url) is False
 
 
+@pytest.mark.parametrize("url", [
+    "https://example.com/markets-and-operations/",
+    "https://evil.com/?x=misoenergy.org/planning/",
+    "javascript:alert(1)",
+    "ftp://www.misoenergy.org/planning/",
+])
+def test_keep_rejects_urls_off_misoenergy(url):
+    """Found in review: a substring match filed foreign URLs under a section
+    literally named "https:" instead of dropping them."""
+    assert bsi.keep(url) is False
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.misoenergy.org/planning/",
+    "https://docs.misoenergy.org/marketreports/guide/",
+    "https://misoenergy.org/legal/tariff/",
+])
+def test_keep_admits_misoenergy_subdomains(url):
+    """Readers' guides live on docs.misoenergy.org, so subdomains count."""
+    assert bsi.keep(url) is True
+
+
 def test_keep_drops_the_bare_domain():
     """No path segments means nothing to label or file under a section."""
     assert bsi.keep("https://www.misoenergy.org/") is False
@@ -162,3 +184,53 @@ def test_ingest_site_index_is_a_no_op_when_the_file_is_absent(monkeypatch, tmp_p
         raise AssertionError("must not touch the index when the file is missing")
 
     assert ingest_docs.ingest_site_index(explode, explode) == 0
+
+
+class RecordingSplitter:
+    def __init__(self):
+        self.documents = None
+
+    def get_nodes_from_documents(self, documents):
+        self.documents = documents
+        return ["node-a", "node-b"]
+
+
+class RecordingIndex:
+    def __init__(self):
+        self.nodes = None
+
+    def insert_nodes(self, nodes):
+        self.nodes = nodes
+
+
+def test_ingest_site_index_tags_chunks_reference_doc(monkeypatch, tmp_path):
+    """The tag is load-bearing, not cosmetic.
+
+    ingest_general_docs evicts by `doc_type == "reference_doc"` before
+    inserting. A chunk tagged anything else would survive that sweep and be
+    re-inserted every run, so the store would grow a duplicate copy of the
+    whole index per ingest - silently, since nothing errors.
+    """
+    from backend.rag import ingest_docs
+    index_file = tmp_path / "site_index.md"
+    index_file.write_text("# MISO site index\n\n- **Market Reports** - x - https://y/\n")
+    monkeypatch.setattr(ingest_docs, "SITE_INDEX_PATH", index_file)
+
+    splitter, index = RecordingSplitter(), RecordingIndex()
+    count = ingest_docs.ingest_site_index(index, splitter)
+
+    assert count == 2
+    assert index.nodes == ["node-a", "node-b"]
+    doc = splitter.documents[0]
+    assert doc.metadata["doc_type"] == "reference_doc"
+    assert doc.metadata["source_url"]
+    assert "Market Reports" in doc.text
+
+
+def test_ingest_site_index_keeps_the_url_out_of_the_embedding():
+    """source_url is metadata, not meaning - embedding it only adds noise."""
+    from backend.rag import ingest_docs
+    import inspect
+    source = inspect.getsource(ingest_docs.ingest_site_index)
+    assert "excluded_embed_metadata_keys" in source
+    assert "excluded_llm_metadata_keys" in source

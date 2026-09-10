@@ -10,6 +10,11 @@ One request, for https://www.misoenergy.org/sitemap.xml - a file MISO publishes
 for exactly this purpose. That is not crawling, and the URL list it returns is
 NOT a license to fetch those pages: miso.org bans scrapers (see AGENTS.md).
 
+Most of the sitemap is not worth indexing: events and stakeholder engagement
+are 86 percent of its 2,595 URLs, and a meeting page from 2023 is never the
+answer to "where do I find X?". Dropping those, news releases and dated
+notification posts leaves 209 pages that are.
+
 Like crosswalk.json, the output is committed. It cannot be fetched per-file the
 way doc_sources.json entries are, so it ships in the repo and teammates get it
 from a clone rather than a build step they have to remember.
@@ -19,6 +24,7 @@ import datetime
 import re
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 # defusedxml, not stdlib ElementTree: this parses XML fetched over the network,
@@ -26,12 +32,11 @@ import requests
 from defusedxml.ElementTree import fromstring as xml_fromstring
 
 SITEMAP_URL = "https://www.misoenergy.org/sitemap.xml"
+SITE_HOST = "misoenergy.org"
 OUT_PATH = Path(__file__).resolve().parent / "site_index.md"
 TIMEOUT = 30
 
-# Sections that are one-off content rather than places to send someone. Events
-# and stakeholder engagement alone are 86 percent of the sitemap, and a meeting
-# page from 2023 is never the answer to "where do I find X?".
+# One-off content rather than places to send someone - see the docstring.
 DROP_SECTIONS = {"events", "engage", "extranet", "account", "manage",
                  "search", "past-events"}
 
@@ -69,7 +74,18 @@ def fetch_sitemap(url: str = SITEMAP_URL) -> list[str]:
 
 
 def path_parts(url: str) -> list[str]:
-    return [p for p in url.split("misoenergy.org/")[-1].split("/") if p]
+    """The URL's path segments. Parsed, not string-split: a foreign URL used to
+    yield ['https:', 'example.com', ...] and file itself under a section called
+    "https:" instead of being dropped."""
+    return [p for p in urlsplit(url).path.split("/") if p]
+
+
+def on_miso(url: str) -> bool:
+    """misoenergy.org or a subdomain of it, over http(s)."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    return (parts.scheme in ("http", "https")
+            and (host == SITE_HOST or host.endswith("." + SITE_HOST)))
 
 
 def label(segment: str) -> str:
@@ -80,6 +96,8 @@ def label(segment: str) -> str:
 
 def keep(url: str) -> bool:
     """True for pages worth sending someone to."""
+    if not on_miso(url):
+        return False
     parts = path_parts(url)
     if not parts or parts[0] in DROP_SECTIONS:
         return False

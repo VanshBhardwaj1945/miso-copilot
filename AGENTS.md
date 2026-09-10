@@ -98,7 +98,10 @@ pip install pytest pytest-cov   # dev tools, deliberately not in requirements.tx
 pytest
 ```
 
-Nothing else is covered yet. For the rest, minimum verification for any change:
+`backend/rag/build_site_index.py` and `ingest_site_index` have their own tests
+in `tests/test_site_index.py`; they run under a bare `pytest` but sit outside
+the coverage floor, which measures `backend.poller` only. Nothing else is
+covered yet. For the rest, minimum verification for any change:
 the touched UI boots and a chat message round-trips (stub answer / graceful
 handoff is fine). If you add backend code, also verify `uvicorn` boots and
 `/ask` responds. The React
@@ -161,9 +164,9 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - **Do NOT scrape miso.org.** It has anti-scraping protection; scrapers get
   IP-banned. Use the public APIs and politely-fetched documents only. The
   document corpus is nine hand-picked URLs in `backend/rag/doc_sources.json`,
-  and `site_index.md` lists page URLs from MISO's published sitemap - fetching
-  that one file is fine, fetching the pages it lists is the crawl that is not,
   fetched once with a pause between requests - add to the list, never crawl.
+  `site_index.md` lists page URLs taken from MISO's published sitemap: fetching
+  that one file is fine, fetching the pages it lists is the crawl that is not.
 - **Rate limit: max ~1 request per endpoint per minute** against
   `https://public-api.misoenergy.org` (free JSON, no auth). The 5-min poller is
   already far under this, and a per-link lease in
