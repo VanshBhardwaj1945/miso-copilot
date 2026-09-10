@@ -41,6 +41,20 @@ Chroma + LlamaIndex retrieval layer. Two feeds go in, one search comes out.
   to read; `--promote` turns it into `crosswalk.json`. Parameter *values*
   (`preliminaryFinal=Final`, `timeResolution=hourly`) are not in the spec and
   were checked by hand against gridstatus, an open-source client.
+- `site_index.md` - a map of which misoenergy.org page covers which topic:
+  209 pages, each as `name - where it sits - URL`. The most common question is
+  "where do I find X?", and for that the link is the answer; without this the
+  model declines rather than guess a URL. Ingested by `ingest_docs.py` as
+  ordinary reference-doc chunks. It cites MISO's home page, but the real page
+  URLs are in the chunk text, which is what lets an answer link the exact page.
+  Tracked, like `crosswalk.json`, because it is generated rather than fetched -
+  there is no per-file URL for `fetch_docs` to pull.
+- `build_site_index.py` - regenerates that file. One request for MISO's
+  published `sitemap.xml`, then a filter: events and stakeholder engagement are
+  86 percent of the 2,595 URLs and never the answer to "where do I find X?", so
+  they go, along with news releases and dated notification posts. That is a
+  sitemap fetch, not a crawl - the URL list it returns is **not** a license to
+  fetch those pages.
 - `retriever.py` - `search_docs(query)`: searches each lane separately -
   top-2 live snapshots and top-4 document chunks, by `doc_type` filter - and
   hands both to Claude, snapshots first. One shared top-k let Fact Sheet
@@ -51,7 +65,7 @@ Building the corpus (once, or whenever `doc_sources.json` changes):
 
 ```bash
 .venv/bin/python -m backend.rag.fetch_docs     # downloads 9 files, ~30 s
-.venv/bin/python -m backend.rag.ingest_docs    # docs + crosswalk; backend stopped first
+.venv/bin/python -m backend.rag.ingest_docs    # docs + crosswalk + site index; backend stopped first
 ```
 
 Regenerating the crosswalk (after adding guides, or with the official spec):
