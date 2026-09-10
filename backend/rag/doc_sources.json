@@ -46,5 +46,45 @@
     "file": "reliability-imperative-2026-summary.pdf",
     "title": "2026 Reliability Imperative - summary",
     "url": "https://cdn.misoenergy.org/2026%20Reliability%20Imperative%20Summary744321.pdf"
+  },
+  {
+    "file": "about_miso.md",
+    "title": "About MISO - who MISO is, leadership, footprint",
+    "url": "https://www.misoenergy.org/meet-miso/about-miso/"
+  },
+  {
+    "file": "markets-operations.md",
+    "title": "Markets and Operations - overview of MISO's energy markets",
+    "url": "https://www.misoenergy.org/markets-and-operations/"
+  },
+  {
+    "file": "mtep.md",
+    "title": "MISO Transmission Expansion Plan (MTEP) - the annual planning process",
+    "url": "https://www.misoenergy.org/planning/transmission-planning/mtep/"
+  },
+  {
+    "file": "MTEP25_transmission.md",
+    "title": "MTEP25 report - projects, miles and drivers for the 2025 plan",
+    "url": "https://www.misoenergy.org/planning/transmission-planning/mtep/"
+  },
+  {
+    "file": "reliability-imperative.md",
+    "title": "Reliability Imperative - MISO's long-term plan for grid reliability",
+    "url": "https://www.misoenergy.org/meet-miso/MISO_Strategy/reliability-imperative/"
+  },
+  {
+    "file": "2026_reliability_report.md",
+    "title": "2026 Reliability Imperative report (full living document)",
+    "url": "https://www.misoenergy.org/meet-miso/MISO_Strategy/reliability-imperative/"
+  },
+  {
+    "file": "futures_report.md",
+    "title": "MISO Futures Report Series 2 - long-range scenarios",
+    "url": "https://www.misoenergy.org/engage/committees/futures/"
+  },
+  {
+    "file": "transmission_owners.md",
+    "title": "MISO transmission owners - the member TOs by name",
+    "url": "https://www.misoenergy.org/markets-and-operations/settlements/to-rate-data/"
   }
 ]
