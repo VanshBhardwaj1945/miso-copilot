@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "intervalEST": "1970-01-01T00:00:00",
+      "region": "NORTH",
+      "fuel": "Coal",
+      "mw": "600"
+    },
+    {
+      "intervalEST": "1970-01-01T00:00:00",
+      "region": "CENTRAL",
+      "fuel": "Wind",
+      "mw": "400"
+    },
+    {
+      "intervalEST": "1970-01-01T00:00:00",
+      "region": "SOUTH",
+      "fuel": "Natural Gas",
+      "mw": "300"
+    }
+  ],
+  "page": {
+    "pageNumber": 1,
+    "pageSize": 5000,
+    "lastPage": true,
+    "totalCount": 3
+  }
+}

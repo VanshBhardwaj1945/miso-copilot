@@ -1,4 +1,4 @@
-"""Fetch four MISO public JSON endpoints and write them verbatim to data/raw/.
+"""Fetch MISO's live JSON endpoints and write them verbatim to data/raw/.
 
 The bytes MISO returns are the bytes written to disk; the RAG lane reads them
 and does everything downstream. Two exceptions to "verbatim": a shape gate that
@@ -28,6 +28,9 @@ from zoneinfo import ZoneInfo
 import requests
 import urllib3
 
+# config, not os.environ directly, so `python -m backend.poller` picks up .env
+# the same way the API process does
+from backend import config
 from backend.poller import guard
 
 log = logging.getLogger(__name__)
@@ -49,6 +52,23 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate",
 }
 STALE_TMP_SECONDS = 600
+
+# Which API an endpoint belongs to. Decides the base URL and whether the
+# subscription key is sent.
+PUBLIC = "public"
+DATA_EXCHANGE = "data_exchange"
+
+# Data Exchange responses are paged. Ask for a page large enough that one
+# request almost always suffices - MISO allows ~1 request per endpoint per
+# minute, and a paged fetch is several requests to the same link.
+DE_PAGE_SIZE = 5000
+# Hard stop, so a server that never sets lastPage cannot loop or fill the disk.
+DE_MAX_PAGES = 5
+# One guard lease covers the endpoint, not each page, so this pause is the only
+# thing holding a paged fetch to MISO's limit - hence the guard's own interval
+# rather than something smaller. _fetch_all_pages has the arithmetic.
+DE_PAGE_PAUSE_SECONDS = guard.MIN_SECONDS_BETWEEN
+
 DEFAULT_POLL_SECONDS = 300
 MIN_POLL_SECONDS = 5
 MAX_POLL_SECONDS = 3600
@@ -85,6 +105,10 @@ class Endpoint(NamedTuple):
     path: str
     shape: Callable[[object], bool]
     ref_path: tuple[str, ...] | None   # None for Snapshot - it has no RefId
+    # Every field below defaults to how the four legacy display feeds behave,
+    # so adding them changed nothing about those four.
+    source: str = PUBLIC              # PUBLIC or DATA_EXCHANGE
+    paged: bool = False               # follow page.lastPage and concatenate
 
 
 # Snapshot is exempt from the ref_id gate and has no frozen-feed signal,
@@ -99,6 +123,80 @@ ENDPOINTS = [
     Endpoint("WindSolar", "/api/WindSolar/GetCombined",
              _shape_windsolar, ("RefId",)),
 ]
+
+
+def _shape_de_fueltype(body: object) -> bool:
+    """A Data Exchange page: {"data": [...], "page": {...}} with rows that name a region."""
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        return False
+    rows = body["data"]
+    if not rows:
+        return False
+    return all(isinstance(r, dict) and "region" in r for r in rows)
+
+
+# Data Exchange endpoints are registered only when a subscription key exists;
+# see active_endpoints(). {date} is filled per cycle in fixed EST.
+DATA_EXCHANGE_ENDPOINTS = [
+    Endpoint("DEFuelMix", "/lgi/v1/real-time/{date}/generation/fuel-type",
+             _shape_de_fueltype, None,
+             source=DATA_EXCHANGE, paged=True),
+]
+
+
+def data_exchange_key() -> str | None:
+    """The subscription key, or None.
+
+    os.environ only, deliberately: backend.config's .env loader uses
+    os.environ.setdefault, so a key in .env is already here. Reading
+    config.MISO_API_KEY as well would resurrect a value the environment has
+    since cleared - which broke test isolation exactly once.
+    """
+    return os.environ.get("MISO_API_KEY")
+
+
+def active_endpoints() -> list[Endpoint]:
+    """The legacy four, plus Data Exchange when a key is configured.
+
+    No key is not an error: the four display feeds are the demo's proven path
+    and answer every question they answered before.
+    """
+    if not data_exchange_key():
+        return list(ENDPOINTS)
+    return list(ENDPOINTS) + list(DATA_EXCHANGE_ENDPOINTS)
+
+
+def endpoint_base(endpoint: Endpoint, public_base: str) -> str:
+    """Which host this endpoint is fetched from."""
+    if endpoint.source == DATA_EXCHANGE:
+        return safe_base(os.environ.get("MISO_DATA_EXCHANGE_BASE")
+                         or config.DATA_EXCHANGE_BASE)
+    return public_base
+
+
+def endpoint_url(endpoint: Endpoint, base: str) -> str:
+    """The full URL, with {date} filled in.
+
+    Fixed EST, not America/New_York: MISO stamps its market days in EST all
+    year, so a DST-aware zone would ask for the wrong day for an hour each
+    night. Same reasoning as the "as of" stamp in routes/ask.py.
+    """
+    path = endpoint.path
+    if "{date}" in path:
+        path = path.replace("{date}",
+                            datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d"))
+    return base + path
+
+
+def _headers_for(endpoint: Endpoint) -> dict:
+    """Request headers. Data Exchange also needs the subscription key."""
+    if endpoint.source != DATA_EXCHANGE:
+        return HEADERS
+    key = data_exchange_key()
+    if not key:
+        return HEADERS
+    # never logged: _fetch logs response.url, and the key is a header
+    return {**HEADERS, "Ocp-Apim-Subscription-Key": key}
 
 
 # --- configuration ----------------------------------------------------------
@@ -436,7 +534,7 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
     """
     deadline = time.monotonic() + MAX_REQUEST_SECONDS
     try:
-        response = requests.get(url, timeout=TIMEOUT, headers=HEADERS,
+        response = requests.get(url, timeout=TIMEOUT, headers=_headers_for(endpoint),
                                 allow_redirects=False, stream=True)
     except TRANSPORT_ERRORS as e:
         return _fetch_failure(_transport_error(e, endpoint))
@@ -461,6 +559,66 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
         return _fetch_failure(f"HTTP {status}", status, size)
 
     return _validate(endpoint, content, status, size)
+
+
+def _page_url(url: str, page_number: int) -> str:
+    """The same link with paging parameters. Kept as one place so the guard key
+    (page 1's URL) and every follow-up differ only in the query string."""
+    joiner = "&" if "?" in url else "?"
+    return f"{url}{joiner}pageNumber={page_number}&pageSize={DE_PAGE_SIZE}"
+
+
+def _fetch_all_pages(endpoint: Endpoint, url: str) -> dict:
+    """Fetch a paged endpoint and return one assembled payload.
+
+    Stops at page.lastPage, or DE_MAX_PAGES - a server that never sets
+    lastPage must not loop forever or fill the disk. The assembled result is
+    written as a single file, so data/raw/ stays one-file-per-endpoint.
+
+    Each extra page is another request to the same link, and MISO allows about
+    one per endpoint per minute. The rate guard cannot help: it leases per
+    link, and this whole fetch runs under one lease. So DE_PAGE_PAUSE_SECONDS
+    is what makes the limit true, and it is the guard's own
+    MIN_SECONDS_BETWEEN - a shorter pause would breach the very rule the guard
+    exists to keep, and the penalty is an IP ban we cannot undo.
+
+    The arithmetic works out. DE_PAGE_SIZE is large enough that one page is the
+    normal case, which pauses not at all; the worst case is DE_MAX_PAGES (5)
+    pages, so four pauses, 240 s, inside the 300 s cadence. And an overrun is
+    survivable anyway: the scheduled job is coalesce=True, max_instances=1, so
+    a cycle that runs long delays the next one instead of stacking on it.
+
+    A truncated fetch is recorded as a failure rather than passed off as
+    complete - that includes a response whose paging metadata is missing,
+    which is malformed rather than finished.
+    """
+    rows: list = []
+    page_meta: dict = {}
+    for page_number in range(1, DE_MAX_PAGES + 1):
+        if page_number > 1:
+            # the one thing standing between a multi-page cycle and several
+            # back-to-back requests at a link limited to one per minute
+            time.sleep(DE_PAGE_PAUSE_SECONDS)
+        result = _fetch(endpoint, _page_url(url, page_number))
+        if not result["ok"]:
+            return result
+        body = json.loads(result["content"])
+        rows.extend(body.get("data") or [])
+        page_meta = body.get("page") or {}
+        # An absent lastPage is malformed, not "you're done". Assuming done
+        # would store page one as though it were the whole day - the exact
+        # silent truncation this function exists to prevent.
+        if not isinstance(page_meta.get("lastPage"), bool):
+            return _fetch_failure("paging metadata missing")
+        if page_meta["lastPage"]:
+            break
+    else:
+        # ran out of pages without lastPage: better to fail loudly than to
+        # store a partial fuel mix that reads as complete
+        return _fetch_failure(f"more than {DE_MAX_PAGES} pages")
+
+    assembled = json.dumps({"data": rows, "page": page_meta}).encode()
+    return _validate(endpoint, assembled, 200, len(assembled))
 
 
 # --- one endpoint, end to end -----------------------------------------------
@@ -490,7 +648,7 @@ def _poll_endpoint(endpoint: Endpoint, url: str, directory: Path,
     if not bypass_guard and not guard.claim(url):
         return _skipped_observation()
 
-    result = _fetch(endpoint, url)
+    result = _fetch_all_pages(endpoint, url) if endpoint.paged else _fetch(endpoint, url)
     observed = {
         "outcome": "failed",
         "last_attempt": now().isoformat(),
@@ -598,7 +756,7 @@ def _all_skipped_status(directory: Path) -> dict:
     unchanged = dict(previous) if previous else {
         "endpoints": {endpoint.key: dict(INITIAL_ENTRY, path=endpoint.path,
                                          outcome="skipped")
-                      for endpoint in ENDPOINTS}}
+                      for endpoint in active_endpoints()}}
     unchanged["skipped"] = True
     return unchanged
 
@@ -609,7 +767,7 @@ def _write_status(directory: Path, observations: dict, base: str,
     with guard.file_lock(status_path(directory)):
         previous_endpoints = read_status(directory).get("endpoints", {})
         results = {}
-        for endpoint in ENDPOINTS:
+        for endpoint in active_endpoints():
             key = endpoint.key
             entry = _usable_entry(previous_endpoints.get(key))
             entry["path"] = endpoint.path
@@ -631,7 +789,7 @@ def _write_status(directory: Path, observations: dict, base: str,
 
 
 def poll_once() -> dict:
-    """Fetch all four endpoints, validate, write files, update the status file.
+    """Fetch every active endpoint, validate, write files, update the status file.
 
     Returns the status dict that was written. If every endpoint was skipped by
     the rate guard, nothing is fetched or written and the previously stored
@@ -653,11 +811,12 @@ def poll_once() -> dict:
     # all network requests happen here, with no lock held and the status file
     # not yet read (reading it first is how two cycles once merged onto stale entries)
     observations = {}
-    for endpoint in ENDPOINTS:
+    for endpoint in active_endpoints():
         key = endpoint.key
         try:
             observations[key] = _poll_endpoint(
-                endpoint, base + endpoint.path, directory, bypass_guard)
+                endpoint, endpoint_url(endpoint, endpoint_base(endpoint, base)),
+                directory, bypass_guard)
         except Exception:
             # _fetch names every failure it can foresee; this is a bug in our code
             log.exception("%s: unexpected failure", key)

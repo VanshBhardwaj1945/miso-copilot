@@ -37,3 +37,10 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+
+# MISO Data Exchange (the API replacing the CSV market reports on Sept 30).
+# Free, but every call needs a subscription key. Absent, the poller registers
+# no Data Exchange endpoints and the legacy display feeds carry on alone.
+MISO_API_KEY = os.getenv("MISO_API_KEY")
+DATA_EXCHANGE_BASE = os.getenv("MISO_DATA_EXCHANGE_BASE",
+                               "https://apim.misoenergy.org")

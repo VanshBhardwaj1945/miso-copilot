@@ -9,6 +9,7 @@ from llama_index.core.schema import Document
 
 from backend.rag.store import get_chroma_collection, get_index
 from backend.rag.transformers import (
+    transform_de_fueltype,
     transform_fuelmix,
     transform_load,
     transform_snapshot,
@@ -31,6 +32,9 @@ ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] =
     "RealTimeTotalLoad.json": ("miso_snapshot_load", transform_load),
     "Snapshot.json": ("miso_snapshot_snapshot", transform_snapshot),
     "WindSolar.json": ("miso_snapshot_windsolar", transform_windsolar),
+    # Data Exchange, present only once a subscription key is configured. Same
+    # treatment as the four above: one fixed doc id, overwritten each cycle.
+    "DEFuelMix.json": ("miso_snapshot_de_fueltype", transform_de_fueltype),
 }
 
 

@@ -86,5 +86,20 @@
     "file": "transmission_owners.md",
     "title": "MISO transmission owners - the member TOs by name",
     "url": "https://www.misoenergy.org/markets-and-operations/settlements/to-rate-data/"
+  },
+  {
+    "file": "Fuel-Consumables Report - 11-13-2023630897.pdf",
+    "title": "MISO Fuel and Consumables Report (13 Nov 2023) - weekly fuel inventory and system conditions",
+    "url": "https://www.misoenergy.org/markets-and-operations/reliability-information/fuel-consumables-reports/"
+  },
+  {
+    "file": "Fuel-Consumables Report - 10-23-2023630642.pdf",
+    "title": "MISO Fuel and Consumables Report (23 Oct 2023) - weekly fuel inventory and system conditions",
+    "url": "https://www.misoenergy.org/markets-and-operations/reliability-information/fuel-consumables-reports/"
+  },
+  {
+    "file": "gas-pipeline-notices.md",
+    "title": "MISO gas pipeline notices - maintenance, capacity constraints and critical notices",
+    "url": "https://www.misoenergy.org/markets-and-operations/notifications/gas-pipeline/"
   }
 ]

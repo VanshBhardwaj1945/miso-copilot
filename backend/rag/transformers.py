@@ -128,3 +128,97 @@ def transform_windsolar(data: dict) -> tuple[str, str, str]:
 
     lines.append(f"Source: MISO Wind & Solar Report ({MISO_DISPLAY_URL})")
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
+
+# --- MISO Data Exchange -----------------------------------------------------
+
+# The API replacing the CSV market reports on 2026-09-30. Same idea as the
+# legacy feeds above - JSON in, one plain-English paragraph out - but the rows
+# are broken out by region, which the display feeds never were.
+DATA_EXCHANGE_DOC_URL = (
+    "https://data-exchange.misoenergy.org/api-details"
+    "#api=load-generation-and-interchange-api"
+    "&operation=get-v1-real-time-date-generation-fuel-type"
+)
+
+# MISO returns NORTH/CENTRAL/SOUTH/MISO/NO_REGION; these read better in prose.
+_REGION_NAMES = {
+    "NORTH": "MISO North", "CENTRAL": "MISO Central", "SOUTH": "MISO South",
+    "MISO": "MISO overall", "NO_REGION": "unassigned to a region",
+}
+_FUEL_NAMES = {
+    "coal": "coal", "gas": "natural gas", "nuclear": "nuclear",
+    "water": "hydro", "wind": "wind", "solar": "solar",
+    "storage": "storage", "other": "other",
+}
+
+
+def _row_time(row: dict) -> str:
+    """The row's interval, as a sortable string. Missing sorts oldest."""
+    interval = row.get("timeInterval") or {}
+    return str(interval.get("start") or interval.get("value") or "")
+
+
+def _latest_row_per_region(rows: list) -> dict:
+    """The newest row for each region.
+
+    A day's fetch holds every interval and only the newest is "right now", so
+    this compares timeInterval rather than trusting the order rows arrive in.
+    MISO does not document that ordering anywhere, and taking the last row on
+    faith would silently report the oldest interval of the day as current if
+    the API ever returned newest-first.
+    """
+    latest: dict = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("region"):
+            continue
+        code = str(row["region"]).upper()
+        if code not in latest or _row_time(row) >= _row_time(latest[code]):
+            latest[code] = row
+    return latest
+
+
+def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
+    """Data Exchange real-time generation by fuel type, per region.
+
+    Returns: (prose, as_of_timestamp, source_url)
+    """
+    rows = data.get("data") if isinstance(data, dict) else None
+    latest = _latest_row_per_region(rows or [])
+    if not latest:
+        return ("No MISO Data Exchange generation data is available.", "", DATA_EXCHANGE_DOC_URL)
+
+    # every row of one fetch shares an interval; take it from any of them
+    sample = next(iter(latest.values()))
+    interval = sample.get("timeInterval") or {}
+    as_of = str(interval.get("value") or interval.get("start") or "").strip()
+
+    lines = [f"MISO generation by fuel type and region, from the MISO Data "
+             f"Exchange API (as of {as_of} EST):" if as_of else
+             "MISO generation by fuel type and region, from the MISO Data Exchange API:"]
+
+    # MISO first when present - it is the footprint total the others sum toward.
+    # Anything MISO adds to the enum later is appended rather than dropped: a
+    # region silently missing from an answer is worse than one with an
+    # unpolished name.
+    known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
+    order = [r for r in known if r in latest] + sorted(set(latest) - set(known))
+    for code in order:
+        row = latest[code]
+        total = _safe_float(row.get("totalMw"))
+        fuels = row.get("fuelTypes") or {}
+        parts = []
+        for key, label in _FUEL_NAMES.items():
+            mw = _safe_float(fuels.get(key))
+            if mw <= 0:
+                continue
+            share = f" ({mw / total * 100:.1f}%)" if total > 0 else ""
+            parts.append(f"{label} {mw:,.0f} MW{share}")
+        name = _REGION_NAMES.get(code, code)
+        if parts:
+            lines.append(f"- {name}: {total:,.0f} MW total - " + ", ".join(parts) + ".")
+        else:
+            lines.append(f"- {name}: {total:,.0f} MW total.")
+
+    lines.append("Regions are MISO North, Central and South; \"MISO overall\" is "
+                 "the whole footprint, so do not add it to the three regions.")
+    return "\n".join(lines), as_of, DATA_EXCHANGE_DOC_URL

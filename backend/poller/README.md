@@ -1,8 +1,21 @@
 # backend/poller
 
-Background poller for the API ingestion lane. It fetches four MISO public
-JSON endpoints on a schedule and writes them to disk **unmodified**. That is
-the whole job.
+Background poller for the API ingestion lane. It fetches MISO's live JSON
+endpoints on a schedule and writes them to disk **unmodified**. That is the
+whole job.
+
+Four endpoints or five, depending on configuration. The four legacy public
+display feeds - FuelMix, RealTimeTotalLoad, Snapshot, WindSolar - are always
+polled. The MISO Data Exchange fuel-type feed joins them when `MISO_API_KEY`
+is set; with no key it registers nothing and the four carry on, which is a
+normal state rather than an error. `active_endpoints()` in `core.py` is that
+decision, and it is the only place that makes it.
+
+The Data Exchange feed differs from the four in three ways: a different host,
+a subscription key sent as an `Ocp-Apim-Subscription-Key` header, and a paged
+response that is assembled into one payload before it is written. The `{date}`
+in its path is filled per cycle in fixed EST, matching MISO's own market-day
+convention rather than local time.
 
 It does not summarize, embed, chunk, or write to Chroma. The RAG lane
 (`../rag/`, a separate workstream) reads the files this writes and does all
@@ -25,10 +38,18 @@ FuelMix.json            verbatim response body
 RealTimeTotalLoad.json  verbatim response body
 Snapshot.json           verbatim response body
 WindSolar.json          verbatim response body
+DEFuelMix.json          every page concatenated, only when MISO_API_KEY is set
 _status.json            sidecar: per-endpoint freshness and health
 _status.lock            empty lock file, held while _status.json is written
 *.tmp                   in-flight atomic writes, swept after 10 minutes
 ```
+
+`DEFuelMix.json` is the one payload that is not byte-for-byte what a response
+carried, because no single response carried it: the pages' `data` arrays are
+concatenated and the last page's `page` block kept. Nothing else is touched. A
+fetch that could not be completed - a page that failed, or paging metadata that
+never said `lastPage` - is recorded as a failure and writes nothing, rather
+than leaving a partial day on disk that reads as a whole one.
 
 The last two are bookkeeping, not data. Anything scanning this directory
 should skip `_status.lock` and `*.tmp`: the lock file is created by every
@@ -55,10 +76,25 @@ the cadence plus MISO's publication lag.
 
 MISO asks that these links not be hit more than once per minute, and
 mentors were explicit that abuse gets an IP banned. So the cadence is not
-the only protection. Before **each individual request**, the poller claims
-a per-link lease under a file lock and writes the claim before issuing the
-request. A link attempted less than 60 seconds ago is skipped for this
-cycle and logged.
+the only protection. Before **each endpoint**, the poller claims a per-link
+lease under a file lock and writes the claim before issuing the request. A
+link attempted less than 60 seconds ago is skipped for this cycle and logged.
+
+One lease covers one endpoint's whole cycle, not one request. For the four
+legacy feeds those are the same thing - a cycle is one request each. For the
+paged Data Exchange feed they are not: a cycle there is up to five requests to
+the same link, so the lease is claimed once for the endpoint and
+`DE_PAGE_PAUSE_SECONDS` in `core.py` paces the pages inside it. That pause is
+the guard's own 60 seconds, and for the same reason the guard's is: a shorter
+one would breach the published limit from inside the lease, where nothing else
+is watching.
+
+The page size is deliberately large, so one page is the normal case and no
+pause happens at all. The worst case is five pages (`DE_MAX_PAGES`), so four
+pauses - 240 s, inside the 300 s cadence. A cycle that did overrun is skipped
+rather than stacked, since the scheduled job is `coalesce=True,
+max_instances=1`. Worth knowing before running `--once` by hand against a
+multi-page day: it can sit for four minutes looking hung, and it is not.
 
 The lease file lives at `~/.cache/miso-copilot/rate-guard.json`, outside
 `data/` and outside the repo, so that no test configuration, no
@@ -108,7 +144,9 @@ JSON in front of an audience.
   value stays guarded, however it is spelled - a stub on another machine,
   another laptop's hostname, a proxy, a typo. The warning printed every
   cycle says which of the two you have: `loopback, RATE GUARD BYPASSED` or
-  `not loopback, rate guard ACTIVE`.
+  `not loopback, rate guard ACTIVE`. This one value decides for the whole
+  cycle, Data Exchange included, so a stub reached through
+  `MISO_DATA_EXCHANGE_BASE` alone stays guarded - which is the safe way round.
 - `MISO_RAW_DIR` - default `data/raw` inside the repo. Warns every cycle
   and is recorded in `_status.json`.
 - `MISO_POLL_SECONDS` - default `300`, clamped to 5-3600. Below 60 only
@@ -117,8 +155,18 @@ JSON in front of an audience.
 - `MISO_POLLER_ENABLED` - default `1`. `0`, `false`, `no`, `off`, or empty
   disables the in-process scheduler only; the standalone commands above
   still run.
+- `MISO_API_KEY` - unset by default, and unset means the four legacy feeds
+  only. Set it and the Data Exchange feed is polled too, with the key sent as
+  `Ocp-Apim-Subscription-Key`. Read from the environment alone, never from
+  `config` - a key `.env` had loaded once outlived the environment clearing
+  it. Never logged: the failure log line carries the URL, and the key is a
+  header.
+- `MISO_DATA_EXCHANGE_BASE` - the Data Exchange host, default
+  `https://apim.misoenergy.org`. Separate from `MISO_API_BASE` because the two
+  APIs are two hosts; point both at the stub to exercise all five links
+  locally.
 
-All four are read after `.env` loading, so they can be set in `.env`. One
+All of these are read after `.env` loading, so they can be set in `.env`. One
 more, read by the API rather than the poller: `MISO_TRUST_PROXY=1` makes the
 per-IP rate limiter honor `X-Forwarded-For` - set it only behind a real
 reverse proxy, since anyone can send that header.

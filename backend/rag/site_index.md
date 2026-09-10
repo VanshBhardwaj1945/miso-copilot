@@ -3,7 +3,7 @@
 A map of MISO's public website: which page covers which topic, and its link.
 Use it to send someone to the right page on misoenergy.org.
 
-Generated 2026-09-10 by backend/rag/build_site_index.py from https://www.misoenergy.org/sitemap.xml .
+Generated 2026-09-10 by backend/rag/build_site_index.py from a saved copy of https://www.misoenergy.org/sitemap.xml .
 
 Each entry is: page name - where it sits - URL.
 

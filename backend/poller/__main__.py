@@ -60,7 +60,7 @@ def run_once() -> int:
         return EXIT_SKIPPED
 
     succeeded = core.succeeded_count(status)
-    total = len(core.ENDPOINTS)
+    total = len(core.active_endpoints())
     if succeeded == 0:
         log.error("all %d endpoints failed", total)
         return EXIT_FAILED
@@ -166,7 +166,7 @@ def print_status(status: dict[str, Any], directory: Path,
 
     endpoints = status.get("endpoints", {})
     print(f"  {'ENDPOINT':<20}{'LAST SUCCESS':<14}{'FAILS':<6}FEED")
-    for endpoint in core.ENDPOINTS:
+    for endpoint in core.active_endpoints():
         key = endpoint.key
         entry = endpoints.get(key)
         if not isinstance(entry, dict):

@@ -54,6 +54,11 @@ POLLER_ENV_VARS = (
     "MISO_RAW_DIR",
     "MISO_POLL_SECONDS",
     "MISO_POLLER_ENABLED",
+    # A real key in .env would otherwise register the Data Exchange endpoint and
+    # break every test that assumes the legacy four - and the spec tells people
+    # to put one there.
+    "MISO_API_KEY",
+    "MISO_DATA_EXCHANGE_BASE",
 )
 
 
@@ -164,11 +169,12 @@ def stub_base():
     """
     servers = []
 
-    def start(modes=None, rotate_ref_id=True):
+    def start(modes=None, rotate_ref_id=True, de_pages=3):
         from tests.stub.server import serve_in_thread
 
         httpd, _thread = serve_in_thread(modes=modes,
-                                         rotate_ref_id=rotate_ref_id)
+                                         rotate_ref_id=rotate_ref_id,
+                                         de_pages=de_pages)
         servers.append(httpd)
         return f"http://127.0.0.1:{httpd.server_port}"
 

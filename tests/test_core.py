@@ -21,12 +21,14 @@ import gzip
 import zlib
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
 import urllib3
 
 from backend.poller import core
+from tests.stub import server as stub_server
 from tests.support import (GOOD_BODIES, GOOD_REF_IDS, FakeRaw,
                            FakeResponse)
 
@@ -1866,3 +1868,130 @@ def test_a_stub_cycle_never_touches_the_real_rate_guard(raw, stub_base,
     monkeypatch.setenv("MISO_API_BASE", stub_base())
     core.poll_once()
     assert not guard.guard_path().exists()
+
+
+# --- the Data Exchange endpoint against the local stub ----------------------
+#
+# Everything above drives the legacy four. These drive the fifth over the same
+# real socket: the subscription key on the wire, several pages assembled into
+# one file, one rate-guard lease for the whole endpoint, and a 401. Paging and
+# auth were previously only verified piecewise, with core._fetch stubbed out.
+
+LEGACY_KEYS = ("FuelMix", "RealTimeTotalLoad", "Snapshot", "WindSolar")
+
+
+@pytest.fixture
+def de_stub(stub_base, monkeypatch):
+    """A stub serving all five links, with the poller pointed at it and keyed.
+
+    Returns a factory taking the same arguments as `stub_base`. Both bases go
+    to the stub, because the Data Exchange feed is a second host. The page
+    pause is patched out: pages are a full minute apart in production
+    (core.DE_PAGE_PAUSE_SECONDS), which is correct there and unaffordable here.
+    """
+    def start(modes=None, de_pages=3):
+        base = stub_base(modes=modes, de_pages=de_pages)
+        monkeypatch.setenv("MISO_API_BASE", base)
+        monkeypatch.setenv("MISO_DATA_EXCHANGE_BASE", base)
+        monkeypatch.setenv("MISO_API_KEY", "stub-subscription-key")
+        monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 0)
+        return base
+
+    return start
+
+
+def stub_counts(base):
+    """The stub's per-link counters and the keys it was shown."""
+    return requests.get(base + "/_counts", timeout=5).json()
+
+
+def test_a_keyed_cycle_against_the_stub_polls_five_links(raw, de_stub):
+    base = de_stub()
+    status = core.poll_once()
+    assert core.succeeded_count(status) == 5
+    assert stub_counts(base)["counts"][stub_server.DE_PATH] == 1
+
+
+def test_a_multi_page_data_exchange_fetch_lands_as_one_file(raw, de_stub):
+    """Three pages over real HTTP, one file on disk with every row in order.
+
+    data/raw/ is one file per endpoint (architecture rule 3, and the RAG lane
+    reads it that way), so the assembly has to happen before the write.
+    """
+    base = de_stub(modes=["de-paged"], de_pages=3)
+    status = core.poll_once()
+
+    assert core.succeeded_count(status) == 5
+    body = json.loads((raw / "DEFuelMix.json").read_bytes())
+    assert [row["region"] for row in body["data"]] == ["NORTH", "CENTRAL", "SOUTH"]
+    assert body["page"]["lastPage"] is True
+    assert stub_counts(base)["counts"][stub_server.DE_PATH] == 3
+    assert not list(raw.glob("DEFuelMix*.tmp"))
+
+
+def test_the_paged_endpoint_claims_one_lease_for_the_whole_cycle(raw, de_stub,
+                                                                 monkeypatch):
+    """Three pages, one claim - the rate-limit property that actually matters.
+
+    A lease per page would be three claims on one link inside one cycle, which
+    is the breach the guard exists to prevent; a lease per endpoint is what
+    makes DE_PAGE_PAUSE_SECONDS load-bearing. Verified end to end because the
+    two halves are only safe together.
+    """
+    from backend.poller import guard
+
+    de_stub(modes=["de-paged"], de_pages=3)
+    # The guard is bypassed for a loopback base and there is no non-loopback
+    # spelling of a stub on this machine, so the check itself is what gets
+    # patched. Everything below it - the lease file, the claims - is real.
+    monkeypatch.setattr(core, "base_is_loopback", lambda base: False)
+    claimed = []
+    real_claim = guard.claim
+
+    def counting_claim(url):
+        claimed.append(url)
+        return real_claim(url)
+
+    monkeypatch.setattr(guard, "claim", counting_claim)
+    status = core.poll_once()
+
+    assert core.succeeded_count(status) == 5
+    de_claims = [url for url in claimed if "generation/fuel-type" in url]
+    assert len(de_claims) == 1
+    # the link, not a page of it: the guard key must not vary per page
+    assert "pageNumber" not in de_claims[0]
+    assert len(claimed) == len(LEGACY_KEYS) + 1
+
+
+def test_the_subscription_key_is_sent_as_the_apim_header(raw, de_stub):
+    """Header, not query string. A key in a URL reaches the log line _fetch
+    writes on failure and the base URL in _status.json."""
+    base = de_stub()
+    core.poll_once()
+    assert stub_counts(base)["de_keys"] == ["stub-subscription-key"]
+
+
+def test_the_stub_refuses_an_unkeyed_data_exchange_request(de_stub):
+    """What makes the assertion above mean something: without the header the
+    stub answers 401, exactly as MISO does."""
+    base = de_stub()
+    date = datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d")
+    url = f"{base}/lgi/v1/real-time/{date}/generation/fuel-type"
+    response = requests.get(url, timeout=5)
+    assert response.status_code == 401
+    assert "missing subscription key" in response.json()["message"]
+
+
+def test_a_rejected_key_fails_only_the_data_exchange_endpoint(raw, de_stub):
+    """Degradation, criterion 9 for the fifth link: a 401 is one failed
+    endpoint and four healthy ones, and no half-written payload."""
+    de_stub(modes=["de-401"])
+    endpoints = core.poll_once()["endpoints"]
+
+    assert endpoints["DEFuelMix"]["outcome"] == "failed"
+    assert endpoints["DEFuelMix"]["last_error"] == "HTTP 401"
+    assert endpoints["DEFuelMix"]["http_status"] == 401
+    assert not (raw / "DEFuelMix.json").exists()
+    for key in LEGACY_KEYS:
+        assert endpoints[key]["outcome"] == "ok"
+        assert (raw / f"{key}.json").exists()
