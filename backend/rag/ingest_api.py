@@ -28,6 +28,43 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PRIMARY_RAW_DIR = REPO_ROOT / "data" / "raw"
 BACKUP_RAW_DIR = REPO_ROOT / "data" / "raw.backup"
 
+# The Data Exchange feeds: title for the citation, and the portal operation
+# that produced the data. Each needs its own operation anchor - pointing every
+# feed at the fuel-type operation sends someone asking about the load forecast
+# to a page that does not mention it, and rule 6 says the source URL is the
+# product.
+DE_FEEDS: dict[str, tuple[str, str]] = {
+    "DEFuelMix": ("real-time generation by fuel type",
+                  "get-v1-real-time-date-generation-fuel-type"),
+    "DEActualLoad": ("actual load", "get-v1-real-time-date-demand-actual"),
+    "DEFuelOnMargin": ("fuel on the margin",
+                       "get-v1-real-time-date-generation-fuel-on-the-margin"),
+    "DEDayAheadDemand": ("day-ahead cleared demand", "get-v1-day-ahead-date-demand"),
+    "DEDayAheadFuelMix": ("day-ahead generation by fuel type",
+                          "get-v1-day-ahead-date-generation-fuel-type"),
+    "DEClearedPhysical": ("day-ahead cleared physical generation",
+                          "get-v1-day-ahead-date-generation-cleared-physical"),
+    "DEClearedVirtual": ("day-ahead cleared virtual generation",
+                         "get-v1-day-ahead-date-generation-cleared-virtual"),
+    "DEOfferedEcoMax": ("day-ahead offered generation, economic maximum",
+                        "get-v1-day-ahead-date-generation-offered-ecomax"),
+    "DEOfferedEcoMin": ("day-ahead offered generation, economic minimum",
+                        "get-v1-day-ahead-date-generation-offered-ecomin"),
+    "DENetScheduled": ("day-ahead net scheduled interchange",
+                       "get-v1-day-ahead-date-interchange-net-scheduled"),
+    "DELoadForecast": ("medium-term load forecast", "get-v1-forecast-date-load"),
+}
+DE_TITLES = {key: title for key, (title, _) in DE_FEEDS.items()}
+
+
+def de_doc_url(key: str) -> str:
+    """The portal page for the operation that produced this feed."""
+    operation = DE_FEEDS[key][1]
+    return ("https://data-exchange.misoenergy.org/api-details"
+            "#api=load-generation-and-interchange-api"
+            f"&operation={operation}")
+
+
 # Endpoint JSON file -> (fixed Chroma doc id, JSON->prose transformer).
 ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] = {
     "FuelMix.json": ("miso_snapshot_fuelmix", transform_fuelmix),
@@ -36,24 +73,13 @@ ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] =
     "WindSolar.json": ("miso_snapshot_windsolar", transform_windsolar),
     # Data Exchange, present only once a subscription key is configured. Same
     # treatment as the four above: one fixed doc id, overwritten each cycle.
-    # fuel-type gets its own transformer because a fuelTypes breakdown reads
+    # fuel-type keeps its own transformer because a fuelTypes breakdown reads
     # better than a flat list; the rest share the generic one.
     "DEFuelMix.json": ("miso_snapshot_de_fueltype", transform_de_fueltype),
     **{
         f"{key}.json": (f"miso_snapshot_{key.lower()}",
-                        make_de_transformer(title, DATA_EXCHANGE_DOC_URL))
-        for key, title in (
-            ("DEActualLoad", "actual load"),
-            ("DEFuelOnMargin", "fuel on the margin"),
-            ("DEDayAheadDemand", "day-ahead cleared demand"),
-            ("DEDayAheadFuelMix", "day-ahead generation by fuel type"),
-            ("DEClearedPhysical", "day-ahead cleared physical generation"),
-            ("DEClearedVirtual", "day-ahead cleared virtual generation"),
-            ("DEOfferedEcoMax", "day-ahead offered generation (economic maximum)"),
-            ("DEOfferedEcoMin", "day-ahead offered generation (economic minimum)"),
-            ("DENetScheduled", "day-ahead net scheduled interchange"),
-            ("DELoadForecast", "medium-term load forecast"),
-        )
+                        make_de_transformer(title, de_doc_url(key)))
+        for key, (title, _) in DE_FEEDS.items() if key != "DEFuelMix"
     },
 }
 
@@ -69,6 +95,18 @@ def _resolve_raw_file(filename: str, raw_dir: Path | None = None) -> Path | None
                     filename, backup)
         return backup
     return None
+
+
+# Data Exchange serves a completed market day; the four display feeds serve
+# now. They answer different questions and must not compete for the same
+# retrieval seats - measured, they do: the eleven settled documents share an
+# opening sentence, embed as a block (0.75 mean cosine against 0.60 for the
+# live feeds), and swept every seat on "total generation right now".
+SETTLED_PREFIX = "DE"
+
+
+def _doc_type_for(filename: str) -> str:
+    return "settled_market_day" if filename.startswith(SETTLED_PREFIX) else "live_snapshot"
 
 
 def upsert_single_endpoint(filename: str, doc_id: str,
@@ -88,6 +126,13 @@ def upsert_single_endpoint(filename: str, doc_id: str,
         log.error("Failed to parse %s: %s", path, err)
         return False
 
+    # "Real-Time Display" on a settled market day undoes what the prose works
+    # to say. The citation label is shown to the user; it has to agree.
+    key = filename.replace(".json", "")
+    title = (f"MISO Data Exchange - {DE_TITLES.get(key, key)} (completed market day)"
+             if _doc_type_for(filename) == "settled_market_day"
+             else f"MISO {key} Real-Time Display")
+
     collection = get_chroma_collection()
     index = get_index()
 
@@ -105,11 +150,11 @@ def upsert_single_endpoint(filename: str, doc_id: str,
         id_=doc_id,
         text=prose,
         metadata={
-            "doc_type": "live_snapshot",
+            "doc_type": _doc_type_for(filename),
             "endpoint": filename.replace(".json", ""),
             "as_of": as_of,
             "source_url": source_url,
-            "title": f"MISO {filename.replace('.json', '')} Real-Time Display",
+            "title": title,
         },
         excluded_embed_metadata_keys=["source_url", "title", "doc_type"],
     )

@@ -62,15 +62,56 @@ LIVE = Node("Wind is 1,500 MW.", "live_snapshot", "WindSolar Display",
             "https://www.misoenergy.org/live", endpoint="WindSolar", as_of="09:25 EST")
 DOC = Node("Market Reports hold historical LMPs.", "reference_doc",
            "Market Reports catalog", "https://www.misoenergy.org/reports")
+SETTLED = Node("MISO actual load by region for the completed market day.",
+               "settled_market_day", "MISO Data Exchange - actual load",
+               "https://data-exchange.misoenergy.org/x",
+               endpoint="DEActualLoad", as_of="2026-09-09T23:00:00")
 
 
 # --- the lane split -------------------------------------------------------
 
 def test_each_lane_is_searched_separately_with_its_own_budget(index):
-    fake = index({"live_snapshot": [LIVE], "reference_doc": [DOC]})
+    fake = index({"live_snapshot": [LIVE], "settled_market_day": [SETTLED],
+                  "reference_doc": [DOC]})
     retriever.search_docs("grid conditions")
     assert fake.asked == {"live_snapshot": retriever.LIVE_TOP_K,
+                          "settled_market_day": retriever.SETTLED_TOP_K,
                           "reference_doc": retriever.DOC_TOP_K}
+
+
+def test_a_settled_market_day_cannot_crowd_out_the_live_feeds(index):
+    """The regression this lane exists to prevent. Eleven settled documents
+    share an opening sentence, embed as a near-duplicate block, and took every
+    seat on "total generation right now" - answering from yesterday while the
+    live feed that knew the answer was cut.
+    """
+    settled = [Node(f"settled {i}", "settled_market_day", f"DE{i}",
+                    f"https://x/{i}", endpoint=f"DE{i}", as_of="2026-09-09T23:00:00")
+               for i in range(11)]
+    index({"live_snapshot": [LIVE], "settled_market_day": settled, "reference_doc": []})
+    context, _, as_of = retriever.search_docs("total generation right now")
+    assert "Wind is 1,500 MW." in context
+    # and the answer is stamped with the live time, not yesterday's
+    assert as_of == "09:25 EST"
+
+
+def test_a_settled_as_of_never_stamps_the_answer(index):
+    """Stamping an answer with yesterday says the whole answer is a day old,
+    even when the live feeds supplied it."""
+    settled = Node("settled", "settled_market_day", "DE", "https://x",
+                   endpoint="DE", as_of="2026-09-09T23:00:00")
+    index({"live_snapshot": [], "settled_market_day": [settled], "reference_doc": []})
+    _, _, as_of = retriever.search_docs("q")
+    assert as_of is None
+
+
+def test_one_document_per_endpoint_in_the_settled_lane_too(index):
+    older = Node("older", "settled_market_day", "DE", "https://x", endpoint="DEFuelMix")
+    newer = Node("newer", "settled_market_day", "DE", "https://x", endpoint="DEFuelMix")
+    index({"live_snapshot": [], "settled_market_day": [newer, older],
+           "reference_doc": []})
+    context, _, _ = retriever.search_docs("q")
+    assert "newer" in context and "older" not in context
 
 
 def test_live_snapshots_come_first(index):

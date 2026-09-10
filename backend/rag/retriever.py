@@ -1,7 +1,7 @@
 """LlamaIndex retriever backing the search_docs step of every answer.
 
-Two lanes share one Chroma collection: four small live snapshots and a few
-dozen reference-document chunks. Searched together, a wordy question about
+Three lanes share one Chroma collection: four live snapshots, eleven settled
+Data Exchange market days, and a few dozen reference-document chunks. Searched together, a wordy question about
 "grid conditions" fills the top-k with Fact Sheet chunks and the live numbers
 never reach Claude. So each lane is searched on its own and both results are
 handed over, snapshots first - every lane keeps a seat at the table and Claude
@@ -16,12 +16,16 @@ from llama_index.core.vector_stores import (
 
 from backend.rag.store import get_index
 
-# Was 2, when there were four snapshots and two covered any question. With the
-# twelve region-scoped Data Exchange feeds there are sixteen, and a question
-# about one region had to out-rank fifteen unrelated snapshots for two seats.
-# Four costs about a tenth of a cent per question in prompt tokens.
-LIVE_TOP_K = 4
-DOC_TOP_K = 4    # the 512-token chunks, same budget as before the doc lane
+# Three lanes, one budget each. A shared budget was tried and measured: the
+# eleven settled Data Exchange documents share an opening sentence, embed as a
+# near-duplicate block, and took all four seats on "what is MISO's total
+# generation right now" - answering from yesterday and stamping it with
+# yesterday's time, while the live feed that knew the answer was cut. Widening
+# the shared budget only admits more of the block; separating the lanes is what
+# guarantees the live feeds a seat.
+LIVE_TOP_K = 2      # four display feeds: what is happening now
+SETTLED_TOP_K = 2   # eleven Data Exchange feeds: a completed market day, by region
+DOC_TOP_K = 4       # the 512-token chunks, same budget as before the doc lane
 
 
 def _retrieve(index, query: str, doc_type: str, top_k: int) -> list:
@@ -39,7 +43,10 @@ def search_docs(query: str, top_k: int = DOC_TOP_K) -> tuple[str, list[dict], st
     Returns: (context_str, sources_list, latest_as_of)
     """
     index = get_index()
+    # live first: a question that can be answered by both should read the
+    # current numbers before yesterday's
     nodes = (_retrieve(index, query, "live_snapshot", LIVE_TOP_K)
+             + _retrieve(index, query, "settled_market_day", SETTLED_TOP_K)
              + _retrieve(index, query, "reference_doc", top_k))
 
     context_blocks = []
@@ -51,7 +58,9 @@ def search_docs(query: str, top_k: int = DOC_TOP_K) -> tuple[str, list[dict], st
     for node in nodes:
         meta = node.metadata or {}
         endpoint = meta.get("endpoint")
-        if meta.get("doc_type") == "live_snapshot" and endpoint:
+        # both snapshot lanes keep one document per endpoint; two chunks of one
+        # endpoint would be the same numbers twice
+        if meta.get("doc_type") in ("live_snapshot", "settled_market_day") and endpoint:
             if endpoint in seen_endpoints:
                 continue
             seen_endpoints.add(endpoint)
@@ -63,6 +72,10 @@ def search_docs(query: str, top_k: int = DOC_TOP_K) -> tuple[str, list[dict], st
         if url and not any(s["url"] == url for s in sources):
             sources.append({"title": title, "url": url})
 
+        # live only, deliberately. A settled market day's as-of is yesterday,
+        # and stamping an answer with it says the whole answer is a day old
+        # even when the live feeds supplied it - which is how "total generation
+        # right now" came back stamped 2026-09-09.
         if meta.get("doc_type") == "live_snapshot" and meta.get("as_of") and not latest_as_of:
             latest_as_of = meta.get("as_of")
 

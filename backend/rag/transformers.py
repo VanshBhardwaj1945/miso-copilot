@@ -289,6 +289,11 @@ def _measures(row: dict) -> str:
             continue
         if isinstance(value, bool) or key not in _MEASURES:
             continue
+        # null is "not reported", not zero. 7 of 96 rows in a real day-ahead
+        # demand payload are null, and "price-sensitive demand 0 MW" is a
+        # number MISO never published.
+        if value is None:
+            continue
         label, unit = _MEASURES[key]
         amount = _safe_float(value)
         parts.append(f"{label} {amount:,.0f} {unit}".rstrip())
