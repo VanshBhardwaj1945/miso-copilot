@@ -26,6 +26,8 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
   llm/                      #   Claude client + system prompt
   rag/                      #   Chroma + LlamaIndex: transformers, both ingests, retriever;
                             #   doc_sources.json = the document corpus (URLs),
+                            #   site_index.md = misoenergy.org page map (tracked,
+                            #   built by build_site_index.py from the sitemap),
                             #   crosswalk.json = report->API mappings, build_crosswalk.py
                             #   drafts them with Claude and validates against the spec
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
@@ -159,6 +161,8 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 - **Do NOT scrape miso.org.** It has anti-scraping protection; scrapers get
   IP-banned. Use the public APIs and politely-fetched documents only. The
   document corpus is nine hand-picked URLs in `backend/rag/doc_sources.json`,
+  and `site_index.md` lists page URLs from MISO's published sitemap - fetching
+  that one file is fine, fetching the pages it lists is the crawl that is not,
   fetched once with a pause between requests - add to the list, never crawl.
 - **Rate limit: max ~1 request per endpoint per minute** against
   `https://public-api.misoenergy.org` (free JSON, no auth). The 5-min poller is

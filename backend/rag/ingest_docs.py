@@ -17,6 +17,7 @@ from llama_index.core import SimpleDirectoryReader
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import Document
 
+from backend.config import MISO_HOME_URL
 from backend.rag.store import get_chroma_collection, get_index
 
 # pypdf warns per font that fontTools could parse encodings more fully; the
@@ -26,6 +27,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 HERE = Path(__file__).resolve().parent
 SOURCES_PATH = HERE / "doc_sources.json"
 CROSSWALK_PATH = HERE / "crosswalk.json"
+SITE_INDEX_PATH = HERE / "site_index.md"
 DOCS_DIR = HERE.parent.parent / "data" / "docs"
 
 # LlamaIndex stamps every file with these; none of them mean anything to a
@@ -82,10 +84,37 @@ def ingest_general_docs() -> int:
         total += len(nodes)
 
     total += ingest_crosswalk(index)
+    total += ingest_site_index(index, splitter)
 
     print(f"Ingested {total} chunks from {len(documents)} document pages "
           f"({len(citations)} sources) into Chroma")
     return total
+
+
+def ingest_site_index(index, splitter) -> int:
+    """The misoenergy.org page map, chunked like any other reference document.
+
+    Lives in backend/rag/ rather than data/docs/ because it is generated, not
+    fetched - same reasoning as crosswalk.json. Each chunk carries MISO's home
+    page as its citation, but the real page URLs are in the chunk text, which
+    is what lets an answer link the exact page.
+    """
+    if not SITE_INDEX_PATH.exists():
+        return 0
+    doc = Document(
+        text=SITE_INDEX_PATH.read_text(encoding="utf-8"),
+        metadata={
+            "doc_type": "reference_doc",
+            "title": "MISO site index - which page on misoenergy.org covers which topic",
+            "source_url": MISO_HOME_URL,
+        },
+        excluded_embed_metadata_keys=["source_url", "doc_type"],
+        excluded_llm_metadata_keys=["source_url", "doc_type"],
+    )
+    nodes = splitter.get_nodes_from_documents([doc])
+    index.insert_nodes(nodes)
+    print(f"  + {len(nodes)} site index chunks")
+    return len(nodes)
 
 
 def crosswalk_prose(entry: dict) -> str:
