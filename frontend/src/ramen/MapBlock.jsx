@@ -1,11 +1,14 @@
-import { US_STATES, VIEW_BOX } from "./usStates.js";
+import { US_STATES, MANITOBA, VIEW_BOX } from "./usStates.js";
 
 // Renders a ```map fenced block from a backend answer. Expected spec:
 // {"title":"...","highlight":["IN","IL",...],"label":"what the highlight means"}
 // Every MISO state is tinted; the highlighted subset is solid. The footprint
 // list lives in backend/config.py and the prompt - this file only draws.
 
-const FOOTPRINT = ["AR", "IA", "IL", "IN", "KY", "LA", "MI", "MN", "MO", "MS", "MT", "ND", "SD", "TX", "WI"];
+const FOOTPRINT = [
+  "AR", "IA", "IL", "IN", "KY", "LA", "MI", "MN",
+  "MO", "MS", "MT", "ND", "SD", "TX", "WI", "MB"
+];
 
 const FILL_HIGHLIGHT = "#087CC1";   // Primary MISO Blue
 const FILL_FOOTPRINT = "#087CC1";   // same hue, tinted via opacity below
@@ -37,9 +40,13 @@ export default function MapBlock({ spec }) {
 
   // only real, in-footprint states get highlighted - the prompt is told the
   // list, but the drawing never trusts it. "Indiana" is accepted as well as "IN".
-  const byName = Object.fromEntries(
-    Object.entries(US_STATES).map(([code, { name }]) => [name.toLowerCase(), code]),
-  );
+  const byName = Object.fromEntries([
+    ...Object.entries(US_STATES).map(([code, { name }]) => [
+      name.toLowerCase(),
+      code,
+    ]),
+    [MANITOBA.name.toLowerCase(), "MB"],
+  ]);
   const highlight = new Set(
     cfg.highlight
       .map((c) => byName[String(c).trim().toLowerCase()] || String(c).trim().toUpperCase())
@@ -66,6 +73,25 @@ export default function MapBlock({ spec }) {
             </path>
           );
         })}
+
+        {(() => {
+          const inMiso = FOOTPRINT.includes("MB");
+          const lit = highlight.has("MB");
+
+          return (
+            <path
+              key="MB"
+              d={MANITOBA.d}
+              fill={lit ? FILL_HIGHLIGHT : FILL_FOOTPRINT}
+              stroke={STROKE}
+              strokeWidth={1}
+            >
+              <title>
+                {MANITOBA.name}{inMiso ? " - MISO" : ""}
+              </title>
+            </path>
+          );
+        })()}
       </svg>
       <div className="miso-map-legend">
         {highlight.size > 0 && (

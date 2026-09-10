@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import logo from "../assets/logo_noname.png";
 import Markdown from "./Markdown.jsx";
+import launcher_logo from "../assets/logo.png"
 import "./MisoRamen.css";
 
 // The Ramen chat panel. Design + product rules: see UI_RULES.md.
@@ -157,7 +159,9 @@ export default function MisoRamen() {
           onClick={() => setIsOpen(true)}
           aria-label="Open MISO Ramen"
         >
-          <span className="miso-ramen-sparkle" aria-hidden="true">✦</span>
+          <span className="miso-ramen-sparkle" aria-hidden="true">
+            <img src={launcher_logo} alt="" />
+          </span>
         </button>
       )}
 
@@ -176,9 +180,9 @@ export default function MisoRamen() {
 
           <header className="miso-ramen-header">
             <div className="miso-ramen-title">
-              <div className="miso-ramen-icon" aria-hidden="true">
-                <span>✦</span>
-              </div>
+              <div className="miso-ramen-icon">
+              <img src={logo} alt="" />
+            </div>
               <div>
                 <h2>MISO Ramen</h2>
                 <span className="miso-ramen-status">
