@@ -49,7 +49,37 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pip-audit
-      - run: pip-audit -r requirements.txt --no-deps
+      # Every ignored advisory below was checked against how this app actually
+      # uses the package, on 2026-09-10, and none are reachable here. Re-check
+      # when the pins move - an ignore that outlives its reason is worse than
+      # a red build.
+      #
+      # transformers: all five need an attacker-controlled model, checkpoint or
+      #   config.json. store.py loads one hardcoded model
+      #   (sentence-transformers/all-MiniLM-L6-v2) and nothing else. No
+      #   torch.load, no Trainer, and trust_remote_code appears nowhere in the
+      #   repo. Fixed in transformers 5.x, which needs torch>=2.5 - no wheel on
+      #   the Intel Mac this is developed on, so the upgrade is deferred and
+      #   tracked, not forgotten.
+      # chromadb: all four are server-mode issues - the /api/v2/tenants HTTP
+      #   API and multi-tenant RBAC. We use chromadb.PersistentClient, embedded,
+      #   with no server and no tenants, so those endpoints do not exist here.
+      #   1.5.9 is the newest release; there is nothing to upgrade to.
+      # nltk: a pathsec sandbox bypass in TransitionParser / AveragedPerceptron
+      #   model persistence, none of which this app calls - nltk arrives
+      #   transitively through llama-index. Upstream says "not yet patched".
+      - run: >
+          pip-audit -r requirements.txt --no-deps
+          --ignore-vuln PYSEC-2025-217
+          --ignore-vuln PYSEC-2026-2288
+          --ignore-vuln PYSEC-2026-2289
+          --ignore-vuln PYSEC-2026-2290
+          --ignore-vuln PYSEC-2026-3929
+          --ignore-vuln PYSEC-2026-311
+          --ignore-vuln PYSEC-2026-3813
+          --ignore-vuln PYSEC-2026-3814
+          --ignore-vuln PYSEC-2026-3815
+          --ignore-vuln PYSEC-2026-3740
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
