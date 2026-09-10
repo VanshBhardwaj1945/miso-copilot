@@ -30,7 +30,9 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
                             #   built by build_site_index.py from the sitemap),
                             #   crosswalk.json = report->API mappings, build_crosswalk.py
                             #   drafts them with Claude and validates against the spec
-  poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README
+  poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README.
+                            #   Four legacy display feeds always; the MISO Data
+                            #   Exchange fuel-type feed too when MISO_API_KEY is set
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
 tests/                      # pytest suite for backend/poller/, plus the MISO stub
@@ -180,7 +182,10 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
 ## Secrets & hygiene
 
 - The Anthropic API key lives in `.env` (gitignored). **Never commit keys**, never
-  print them in logs or error messages.
+  print them in logs or error messages. `MISO_API_KEY` (the Data Exchange
+  subscription key) lives there too and follows the same rules - it is sent as a
+  header, never logged, and without it the Data Exchange endpoint simply is not
+  registered.
 - `data/` and `chroma_db/` are local stores - gitignored, never commit.
 - `/ask` logs every request (ip, question, outcome, ms) to `data/logs/requests.jsonl`
   and rate-limits each IP to 20/min - see `backend/security.py`.

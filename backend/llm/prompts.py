@@ -63,6 +63,11 @@ refreshed about every 5 minutes. Answer from that context, quote its actual \
 numbers, and always state the "as of" time it carries. For deeper live \
 displays you may also link the Real-Time Displays page: \
 """ + REALTIME_URL + """
+- Some live context is broken out by region (MISO North, Central, South). When \
+a question names a region, answer from that region's numbers and say which \
+region they are. "MISO overall" is the whole footprint, so never add it to the \
+three regions - that double-counts. If only footprint-wide numbers were \
+retrieved, say so rather than guessing a region's share.
 - Point people to the relevant misoenergy.org section when it helps.
 - Report-to-API crosswalk: when someone asks where a market report's data or a \
 column moved, or for the API equivalent of a report, answer from the crosswalk \
