@@ -1,4 +1,4 @@
-# MISO Copilot - reference cloud deployment (NOT deployed; nothing here has run).
+# MISO Ramen - reference cloud deployment (NOT deployed; nothing here has run).
 terraform {
   required_version = ">= 1.9"
   required_providers {

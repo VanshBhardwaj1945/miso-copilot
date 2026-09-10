@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown.jsx";
-import "./MisoCopilot.css";
+import "./MisoRamen.css";
 
-// The Copilot chat panel. Design + product rules: see UI_RULES.md.
+// The Ramen chat panel. Design + product rules: see UI_RULES.md.
 // Backend contract: POST /ask {question} -> {answer, sources[{title,url}], as_of}
 // (/ask is proxied to FastAPI on :8000, see vite.config.js)
 
@@ -34,7 +34,7 @@ function messageClass(msg) {
   return "miso-msg miso-msg-assistant";
 }
 
-export default function MisoCopilot() {
+export default function MisoRamen() {
   const [isOpen, setIsOpen] = useState(true);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -124,7 +124,7 @@ export default function MisoCopilot() {
           role: "assistant",
           error: true,
           content:
-            "I couldn't reach MISO Copilot's data service just now. " +
+            "I couldn't reach MISO Ramen's data service just now. " +
             "For help with this question, please reach out to MISO directly.",
           sources: [{ title: "MISO Contact Form", url: CONTACT_URL }],
         },
@@ -153,54 +153,54 @@ export default function MisoCopilot() {
       {/* Floating launcher, shown only while the panel is closed. */}
       {!isOpen && (
         <button
-          className="miso-copilot-launcher"
+          className="miso-ramen-launcher"
           onClick={() => setIsOpen(true)}
-          aria-label="Open MISO Copilot"
+          aria-label="Open MISO Ramen"
         >
-          <span className="miso-copilot-sparkle" aria-hidden="true">✦</span>
+          <span className="miso-ramen-sparkle" aria-hidden="true">✦</span>
         </button>
       )}
 
       {isOpen && (
         <aside
-          className="miso-copilot"
-          aria-label="MISO Copilot"
+          className="miso-ramen"
+          aria-label="MISO Ramen"
           style={{ width: size.width, height: size.height }}
         >
           <div
-            className="miso-copilot-resize"
+            className="miso-ramen-resize"
             onPointerDown={startResize}
             role="separator"
-            aria-label="Resize MISO Copilot"
+            aria-label="Resize MISO Ramen"
           />
 
-          <header className="miso-copilot-header">
-            <div className="miso-copilot-title">
-              <div className="miso-copilot-icon" aria-hidden="true">
+          <header className="miso-ramen-header">
+            <div className="miso-ramen-title">
+              <div className="miso-ramen-icon" aria-hidden="true">
                 <span>✦</span>
               </div>
               <div>
-                <h2>MISO Copilot</h2>
-                <span className="miso-copilot-status">
+                <h2>MISO Ramen</h2>
+                <span className="miso-ramen-status">
                   MISO Information Assistant
                 </span>
               </div>
             </div>
             <button
-              className="miso-copilot-close"
+              className="miso-ramen-close"
               onClick={() => setIsOpen(false)}
-              aria-label="Close MISO Copilot"
+              aria-label="Close MISO Ramen"
             >
               ×
             </button>
           </header>
 
-          <main className="miso-copilot-body" ref={bodyRef}>
+          <main className="miso-ramen-body" ref={bodyRef}>
             {/* Intro + suggested questions, shown until the first message. */}
             {messages.length === 0 && (
               <>
-                <div className="miso-copilot-intro">
-                  <h3>Hi! I'm MISO Copilot.</h3>
+                <div className="miso-ramen-intro">
+                  <h3>Hi! I'm MISO Ramen.</h3>
                   <p>
                     Ask me about the grid right now, market reports, MISO
                     processes, or filings — in plain English. Answers cite
@@ -271,7 +271,7 @@ export default function MisoCopilot() {
             {loading && (
               <div
                 className="miso-msg miso-msg-assistant miso-msg-loading"
-                aria-label="MISO Copilot is searching"
+                aria-label="MISO Ramen is searching"
               >
                 <span className="miso-dot" />
                 <span className="miso-dot" />
@@ -280,7 +280,7 @@ export default function MisoCopilot() {
             )}
           </main>
 
-          <form className="miso-copilot-input-wrapper" onSubmit={handleSubmit}>
+          <form className="miso-ramen-input-wrapper" onSubmit={handleSubmit}>
             <textarea
               ref={inputRef}
               rows={1}
@@ -291,12 +291,12 @@ export default function MisoCopilot() {
               }}
               onKeyDown={handleKeyDown}
               placeholder="Ask a question..."
-              aria-label="Ask MISO Copilot a question"
+              aria-label="Ask MISO Ramen a question"
               disabled={loading}
             />
             <button
               type="submit"
-              className="miso-copilot-send"
+              className="miso-ramen-send"
               aria-label="Send question"
               disabled={loading}
             >

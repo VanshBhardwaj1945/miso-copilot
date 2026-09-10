@@ -1,4 +1,4 @@
-# MISO Copilot - reference cloud deployment (NOT deployed; nothing here has run).
+# MISO Ramen - reference cloud deployment (NOT deployed; nothing here has run).
 # Resource group + shared data sources. The rest of the platform is split by
 # concern: network, edge, cluster, registry, storage, secrets, observability.
 

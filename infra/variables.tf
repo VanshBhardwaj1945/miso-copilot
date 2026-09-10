@@ -1,8 +1,8 @@
-# MISO Copilot - reference cloud deployment (NOT deployed; nothing here has run).
+# MISO Ramen - reference cloud deployment (NOT deployed; nothing here has run).
 variable "prefix" {
   description = "Name prefix for every resource"
   type        = string
-  default     = "misocopilot"
+  default     = "misoramen"
 }
 
 variable "location" {

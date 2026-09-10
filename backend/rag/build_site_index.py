@@ -1,6 +1,6 @@
 """Build site_index.md - a map of which misoenergy.org page covers which topic.
 
-The copilot's most common job is "where do I find X?", and for that the link is
+The assistant's most common job is "where do I find X?", and for that the link is
 the answer. This turns MISO's published sitemap into a short, readable index the
 doc lane can retrieve from, so the answer carries a real URL instead of a guess.
 
@@ -65,7 +65,7 @@ ACRONYMS = {
 def fetch_sitemap(url: str = SITEMAP_URL) -> list[str]:
     """Every <loc> in MISO's sitemap. One polite request."""
     resp = requests.get(url, timeout=TIMEOUT,
-                        headers={"User-Agent": "miso-copilot/1.0 (site index builder)"})
+                        headers={"User-Agent": "miso-ramen/1.0 (site index builder)"})
     resp.raise_for_status()
     root = xml_fromstring(resp.content)
     # the sitemap namespace is declared on the root; match on the tag's suffix

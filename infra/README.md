@@ -1,7 +1,7 @@
 # infra/ — reference cloud deployment
 
 **Nothing here is deployed.** This folder is real, validated Terraform
-(`terraform validate` passes, azurerm ~> 5.4) showing how MISO Copilot would
+(`terraform validate` passes, azurerm ~> 5.4) showing how MISO Ramen would
 run in production — for the presentation and for future work.
 
 ![Reference deployment](../docs/terraform-architecture.svg)

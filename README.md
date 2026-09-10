@@ -1,4 +1,4 @@
-# MISO Copilot
+# MISO Ramen
 
 An AI assistant that sits on top of [miso.org](https://www.misoenergy.org) and answers
 plain-English questions about MISO's public data - so routine questions get answered in
@@ -15,17 +15,17 @@ it is findable by a normal person. The site search is weak and the Market Report
 has 11 categories of files with almost no filtering. So everyone from curious citizens to
 utility analysts emails MISO's human teams instead.
 
-**MISO Copilot deflects those routine questions**: ask in plain English, get an answer
+**MISO Ramen deflects those routine questions**: ask in plain English, get an answer
 with a source link, sourced from MISO's own public data. Live questions ("how much wind
 right now?") are answered from MISO's APIs; "where do I find X?" questions are answered
 from a small curated set of MISO's own documents - and the link is the answer. And
 because MISO is retiring its CSV market reports in favor of the Data Exchange API on
-Sept 30 with no published mapping between the two, the copilot carries a **report-to-API
+Sept 30 with no published mapping between the two, the ramen carries a **report-to-API
 crosswalk**: ask "where did the MLC column go?" and it names the endpoint and the field.
 
 ## How it works
 
-![MISO Copilot architecture](docs/architecture.svg)
+![MISO Ramen architecture](docs/architecture.svg)
 
 Want the full picture? A more detailed version lives in
 [`docs/architecture-detailed.svg`](docs/architecture-detailed.svg)
@@ -116,7 +116,7 @@ branch coverage).
 ## Repo layout
 
 ```
-frontend/          # React demo UI: landing page + Copilot chat widget
+frontend/          # React demo UI: landing page + Ramen chat widget
 backend/
   routes/          #   /ask and /health
   llm/             #   Claude client + system prompt

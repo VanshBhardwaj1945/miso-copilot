@@ -19,7 +19,7 @@ resource "azurerm_storage_account" "data" {
 }
 
 resource "azurerm_storage_share" "data" {
-  name               = "copilot-data"
+  name               = "ramen-data"
   storage_account_id = azurerm_storage_account.data.id
   quota              = 16 # GB - snapshots, request log, Chroma volume
 }

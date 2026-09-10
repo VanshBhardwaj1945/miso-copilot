@@ -1,4 +1,4 @@
-# MISO Copilot — UI rules (for any agent touching `frontend/`)
+# MISO Ramen — UI rules (for any agent touching `frontend/`)
 
 ## 1. Overall feeling
 
@@ -29,7 +29,7 @@ Professional, institutional, modern, trustworthy. It should feel like a
 - Generic ChatGPT-looking UI
 - MISO's real logo or copied site assets (approximate only)
 
-## 4. Copilot panel
+## 4. Ramen panel
 
 Fixed **bottom-right** (opens from the launcher button), default ~360×520px,
 resizable via the top-left grip, white background, 1px subtle border, 14–16px
@@ -37,7 +37,7 @@ radius, restrained navy shadow. Mobile: near full-width, resize grip hidden.
 
 ## 5. Header
 
-"MISO Copilot" + small sparkle icon in a navy circle; close button on the
+"MISO Ramen" + small sparkle icon in a navy circle; close button on the
 right; clean 64–72px header.
 
 ## 6. Suggested questions

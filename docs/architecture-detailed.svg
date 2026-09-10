@@ -12,7 +12,7 @@
   </defs>
 
   <rect x="0" y="0" width="1240" height="985" fill="#FFFFFF"/>
-  <text x="620" y="36" font-size="18" font-weight="700" fill="#092A47" text-anchor="middle">MISO Copilot &#8212; detailed architecture</text>
+  <text x="620" y="36" font-size="18" font-weight="700" fill="#092A47" text-anchor="middle">MISO Ramen &#8212; detailed architecture</text>
 
   <!-- row 1: background feed -->
   <rect x="40" y="60" width="1160" height="190" rx="12" fill="#F6F9FB" stroke="#DCE5EB"/>

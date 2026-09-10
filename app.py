@@ -1,6 +1,6 @@
-"""MISO Copilot - Streamlit chat UI (fallback frontend).
+"""MISO Ramen - Streamlit chat UI (fallback frontend).
 
-Talks to the FastAPI backend at MISO_COPILOT_BACKEND (default
+Talks to the FastAPI backend at MISO_RAMEN_BACKEND (default
 http://localhost:8000). If the backend is down or unconfigured, shows a
 graceful handoff to MISO's contact form instead of an answer.
 """
@@ -16,7 +16,7 @@ import streamlit as st
 # Matches the ```chart and ```map fenced JSON blocks the backend puts in answers.
 CHART_BLOCK = re.compile(r"```(chart|map)\s*\n(.*?)```", re.DOTALL)
 
-BACKEND_URL = os.getenv("MISO_COPILOT_BACKEND", "http://localhost:8000")
+BACKEND_URL = os.getenv("MISO_RAMEN_BACKEND", "http://localhost:8000")
 CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
 
 SAMPLE_QUESTIONS = [
@@ -27,10 +27,10 @@ SAMPLE_QUESTIONS = [
     "The RT LMP CSV had an MLC column - where is it in the Data Exchange API?",
 ]
 
-st.set_page_config(page_title="MISO Copilot", layout="centered")
+st.set_page_config(page_title="MISO Ramen", layout="centered")
 
 with st.sidebar:
-    st.title("MISO Copilot")
+    st.title("MISO Ramen")
     st.caption(
         "Ask anything about MISO's public data - grid conditions, market reports, "
         "processes, filings. Answers cite their source and state how fresh the "
@@ -47,7 +47,7 @@ with st.sidebar:
         "public documents. Not an official MISO product."
     )
 
-st.title("MISO Copilot")
+st.title("MISO Ramen")
 st.caption("The front door to MISO's public data. Ask in plain English.")
 
 
@@ -117,7 +117,7 @@ def get_answer(question: str) -> str:
         data = resp.json()
     except requests.RequestException:
         return (
-            "I couldn't reach MISO Copilot's data service just now. For help "
+            "I couldn't reach MISO Ramen's data service just now. For help "
             f"with this question, please use the [MISO Contact Form]({CONTACT_URL})."
         )
 

@@ -28,6 +28,18 @@ agent-handoff.md
 /streamlit-8501.png
 /streamlit-check.png
 
+# diagram sketches - regenerate rather than commit; the docs/ SVGs are canonical
+/arch.png
+/tech.png
+/tech-plain.png
+/crosswalk.png
+/diagrams.md
+
+# cloudflare deploy attempt - torn down, kept out of the repo
+/worker/
+.wrangler/
+.dev.vars
+
 # iCloud conflict copies ("file 2.py") - never real files, never committed
 * 2
 * 2.*

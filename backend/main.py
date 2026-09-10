@@ -1,8 +1,8 @@
-"""MISO Copilot backend - FastAPI app entry.
+"""MISO Ramen backend - FastAPI app entry.
 
 Run:  uvicorn backend.main:app --reload --port 8000
 Key:  CLAUDE_API_KEY (or ANTHROPIC_API_KEY) in the environment or in
-      miso-copilot/.env (gitignored).
+      miso-ramen/.env (gitignored).
 
 Layout:
   config.py   env/.env loading, model + URL constants
@@ -68,6 +68,6 @@ async def lifespan(app: FastAPI):
         schedule.stop_scheduler(scheduler)
 
 
-app = FastAPI(title="MISO Copilot API", lifespan=lifespan)
+app = FastAPI(title="MISO Ramen API", lifespan=lifespan)
 app.include_router(router)
 app.include_router(crosswalk_router)

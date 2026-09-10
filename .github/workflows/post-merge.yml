@@ -74,5 +74,5 @@ jobs:
           push: true
           # ghcr requires lowercase; github.repository isn't
           tags: |
-            ghcr.io/vanshbhardwaj1945/miso-copilot:latest
-            ghcr.io/vanshbhardwaj1945/miso-copilot:${{ github.sha }}
+            ghcr.io/vanshbhardwaj1945/miso-ramen:latest
+            ghcr.io/vanshbhardwaj1945/miso-ramen:${{ github.sha }}

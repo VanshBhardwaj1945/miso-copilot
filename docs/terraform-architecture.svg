@@ -9,7 +9,7 @@
   </defs>
 
   <rect x="0" y="0" width="1240" height="1000" fill="#FFFFFF"/>
-  <text x="620" y="36" font-size="18" font-weight="700" fill="#092A47" text-anchor="middle">MISO Copilot in production &#8212; reference deployment (infra/main.tf)</text>
+  <text x="620" y="36" font-size="18" font-weight="700" fill="#092A47" text-anchor="middle">MISO Ramen in production &#8212; reference deployment (infra/)</text>
 
   <!-- row 0: user -->
   <rect x="560" y="60" width="120" height="48" rx="24" fill="#092A47"/>

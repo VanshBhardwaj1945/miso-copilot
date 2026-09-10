@@ -1,4 +1,4 @@
-# MISO Copilot backend: FastAPI + poller + RAG, one image.
+# MISO Ramen backend: FastAPI + poller + RAG, one image.
 # CPU-only torch keeps the image a fraction of the CUDA default.
 
 FROM python:3.12-slim

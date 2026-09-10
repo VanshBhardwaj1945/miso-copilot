@@ -125,7 +125,7 @@ def test_guard_path_falls_back_to_home_cache_when_xdg_is_unset(monkeypatch):
 
 
 def test_guard_path_falls_back_to_home_cache_when_xdg_is_empty(monkeypatch):
-    # An exported-but-empty XDG_CACHE_HOME must not resolve to "/miso-copilot".
+    # An exported-but-empty XDG_CACHE_HOME must not resolve to "/miso-ramen".
     monkeypatch.setenv("XDG_CACHE_HOME", "")
     assert guard.guard_path() == (
         Path.home() / ".cache" / "miso-copilot" / "rate-guard.json")

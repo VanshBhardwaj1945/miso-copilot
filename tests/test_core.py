@@ -1075,7 +1075,7 @@ def test_fetch_does_not_follow_redirects(fake_get):
 
 def test_fetch_sends_the_projects_user_agent(fake_get):
     fetch(fake_get, FakeResponse(GOOD_BODIES["/api/FuelMix"], 200))
-    assert "miso-copilot" in fake_get.calls[0][1]["headers"]["User-Agent"]
+    assert "miso-ramen" in fake_get.calls[0][1]["headers"]["User-Agent"]
 
 
 # --- the body: bounded in size, in time, and in encoding ---------------------

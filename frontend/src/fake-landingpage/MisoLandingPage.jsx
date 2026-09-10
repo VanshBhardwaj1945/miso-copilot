@@ -1,6 +1,6 @@
 import "./MisoLandingPage.css";
 
-// Static demo backdrop — no logic, no routing. The Copilot sits on top.
+// Static demo backdrop — no logic, no routing. The Ramen sits on top.
 // Abstract look-alike only; never MISO's real logo/assets.
 
 export default function MisoLandingPage() {

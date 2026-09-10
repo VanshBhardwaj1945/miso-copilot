@@ -4,7 +4,7 @@ Guidance for AI coding agents (and new humans) working in this repo.
 
 ## What this is
 
-**MISO Copilot** - an AI assistant on top of miso.org that answers plain-English
+**MISO Ramen** - an AI assistant on top of miso.org that answers plain-English
 questions about MISO's public data, so routine questions stop landing in the inboxes
 of MISO's CSR and External Affairs teams. Built for the Fall 2026 MISO Xtern
 Challenge (TechPoint), Prompt 1. Demo day is **Sept 11, 2026** - a working live demo
@@ -17,7 +17,7 @@ and the design decisions with their rationale.
 
 ```
 frontend/                   # React (Vite) demo UI
-  src/copilot/              #   Copilot chat panel - the product
+  src/ramen/              #   Ramen chat panel - the product
   src/fake-landingpage/     #   static MISO-style backdrop (no logic, keep it that way)
   UI_RULES.md               #   design rules & locked palette - read before touching UI
 backend/                    # FastAPI app (entry: uvicorn backend.main:app)

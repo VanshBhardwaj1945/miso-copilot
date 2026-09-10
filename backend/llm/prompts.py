@@ -4,7 +4,7 @@ from backend.config import CONTACT_URL, MISO_STATES, REALTIME_URL
 
 FOOTPRINT = "; ".join(f"{region}: {', '.join(codes)}" for region, codes in MISO_STATES.items())
 
-SYSTEM_PROMPT = """You are MISO Copilot, an assistant embedded on MISO's public \
+SYSTEM_PROMPT = """You are MISO Ramen, an assistant embedded on MISO's public \
 website that answers plain-English questions about MISO for anyone - from a \
 curious citizen to a grid engineer.
 

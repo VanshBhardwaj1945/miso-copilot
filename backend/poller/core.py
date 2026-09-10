@@ -42,7 +42,7 @@ MAX_REQUEST_SECONDS = 20
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 BODY_CHUNK_BYTES = 64 * 1024
 HEADERS = {
-    "User-Agent": "miso-copilot/0.1 (MISO Xtern Challenge 2026)",
+    "User-Agent": "miso-ramen/0.1 (MISO Xtern Challenge 2026)",
     "Accept": "application/json",
     # the body is read raw (see _read_body) and decoded here, so only ask for
     # encodings this file can decode

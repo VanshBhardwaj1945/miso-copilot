@@ -1,7 +1,7 @@
-# MISO Copilot — React frontend
+# MISO Ramen — React frontend
 
 The demo UI: a static MISO-style landing page (`src/fake-landingpage/`) with the
-interactive Copilot chat panel (`src/copilot/`) docked in the bottom-right. The
+interactive Ramen chat panel (`src/ramen/`) docked in the bottom-right. The
 panel is resizable via the grip in its top-left corner, and the input grows as
 you type (Enter sends, Shift+Enter for a new line).
 
@@ -32,7 +32,7 @@ GET  /crosswalk.csv
 
 ## Answer rendering
 
-Assistant answers render rich content (`src/copilot/Markdown.jsx`):
+Assistant answers render rich content (`src/ramen/Markdown.jsx`):
 
 - Full GFM markdown: **bold**, tables, lists, inline links, code blocks
 - LaTeX math via KaTeX: `$...$` / `$$...$$` (real fractions and symbols)
