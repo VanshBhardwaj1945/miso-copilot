@@ -12,7 +12,12 @@ import json
 
 import pytest
 
-from backend.poller import core
+from backend.poller import core, guard
+
+# Captured at import, before no_page_pause below can patch it to zero: the two
+# tests that pin the pacing decision need the real constant, not the value the
+# rest of the suite runs with.
+REAL_PAGE_PAUSE_SECONDS = core.DE_PAGE_PAUSE_SECONDS
 
 
 @pytest.fixture
@@ -147,7 +152,7 @@ def test_a_single_page_is_returned_whole(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_page_pause(monkeypatch):
-    """Pages are paced 2s apart in production; tests must not wait."""
+    """Pages are paced a full minute apart in production; tests must not wait."""
     monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 0)
 
 
@@ -239,6 +244,26 @@ def test_pages_are_paced_apart(monkeypatch):
     monkeypatch.setattr(core, "_fetch", lambda e, u: pages[len(slept)])
     core._fetch_all_pages(core.DATA_EXCHANGE_ENDPOINTS[0], "https://x/f")
     assert slept == [7]      # paused before page 2, not before page 1
+
+
+def test_pages_are_paced_by_the_guards_own_interval():
+    """The pause is the whole rate limit for a paged fetch, so it may not be
+    shorter than the guard's interval.
+
+    The constant used to be 2 seconds beside a comment citing MISO's
+    ~1-request-per-endpoint-per-minute rule, which is a comment describing a
+    limit the code ignored. Five pages two seconds apart is five requests to
+    one link inside ten seconds, and the penalty for that is an IP ban.
+    """
+    assert REAL_PAGE_PAUSE_SECONDS >= guard.MIN_SECONDS_BETWEEN
+
+
+def test_a_worst_case_paged_fetch_still_fits_inside_one_poll_cycle():
+    """The arithmetic that makes a full-minute pause affordable: the worst case
+    is DE_MAX_PAGES pages, so DE_MAX_PAGES - 1 pauses, inside the 300 s cadence.
+    """
+    worst_case = (core.DE_MAX_PAGES - 1) * REAL_PAGE_PAUSE_SECONDS
+    assert worst_case < core.DEFAULT_POLL_SECONDS
 
 
 def test_page_parameters_are_appended():

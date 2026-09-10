@@ -1,9 +1,14 @@
 # The MISO stub server
 
-A local stand-in for the MISO public API, so the ingestion lane's acceptance
-criteria can be run without touching MISO. It serves the four polled links
-from synthetic fixtures, counts requests per link, and can be told to fail
-in the exact ways the criteria describe.
+A local stand-in for the MISO APIs, so the ingestion lane's acceptance
+criteria can be run without touching MISO. It serves the polled links from
+synthetic fixtures, counts requests per link, and can be told to fail in the
+exact ways the criteria describe.
+
+Both APIs the poller fetches from live here: the four legacy public display
+feeds, and the paged, key-authenticated Data Exchange fuel-type link. Point
+`MISO_API_BASE` and `MISO_DATA_EXCHANGE_BASE` at the same stub to drive all
+five.
 
 It binds to `127.0.0.1` and makes no outbound requests. Nothing under
 `backend/` imports it.
@@ -17,7 +22,11 @@ obviously fake and every timestamp is January 1, 1970.
 
 Minimal means minimal: two fuel categories instead of eight, two or three
 load readings instead of 24 and 252, two Snapshot rows instead of four, two
-WindSolar rows instead of 48.
+WindSolar rows instead of 48, three Data Exchange rows instead of hundreds.
+
+`DEFuelMix.json` is one whole day's rows, and the stub cuts pages out of it
+rather than the fixture being one page: three rows, so `--de-pages 3` deals
+one row per page and a test can name the order it expects them back in.
 
 They are committed on purpose, because a stub that cannot be reproduced from
 a checkout is not a test. Real captured payloads belong in `data/raw/`, which
@@ -32,6 +41,8 @@ From the repo root:
     .venv/bin/python -m tests.stub.server --port 8971 --mode html
     .venv/bin/python -m tests.stub.server --port 0 --mode fail-one \
         --fail-endpoint WindSolar
+    .venv/bin/python -m tests.stub.server --port 8971 --mode de-paged \
+        --de-pages 3
 
 `.venv/bin/python` rather than `python`, because macOS ships `python3` only
 and a bare `python` exists just inside an activated virtualenv.
@@ -62,6 +73,7 @@ From a test, run it on a thread instead:
 | `/api/RealTimeTotalLoad` | `fixtures/RealTimeTotalLoad.json` |
 | `/api/Snapshot` | `fixtures/Snapshot.json` |
 | `/api/WindSolar/GetCombined` | `fixtures/WindSolar.json` |
+| `/lgi/v1/real-time/<date>/generation/fuel-type` | `fixtures/DEFuelMix.json`, a page at a time |
 | `/_counts` | per-link request counts and current mode, JSON |
 | `/_mode?mode=html` | switch modes without restarting |
 | `/_reset` | zero the counters |
@@ -70,7 +82,15 @@ From a test, run it on a thread instead:
 Counts are per link, keyed by path, because criteria 8 and 10 ask how many
 times one link was hit, not how many requests the stub saw. A request is
 counted before the response is chosen, so a 302 or a 503 counts exactly like
-a served payload. Control endpoints are never counted.
+a served payload, and each page of a paged fetch counts as the request it is.
+Control endpoints are never counted.
+
+The Data Exchange path carries the market date, which changes at EST midnight.
+Every date counts against the one templated link, so a cycle that straddles
+midnight does not look like two links hit once each. `/_counts` lists it under
+its templated form, and also reports `de_keys`: the subscription keys that link
+was shown, in order, which is how a test proves the header reached the wire.
+Synthetic test keys only - nothing but the suite can reach this server.
 
 ## Failure modes
 
@@ -86,10 +106,17 @@ Pass one with `--mode`, or several comma separated
 | `empty-load` | `{"LoadInfo": {}}` for RealTimeTotalLoad | `missing ref_id` |
 | `empty-snapshot` | `[{}]` for Snapshot | `shape check failed` |
 | `fail-one` | 503 on `--fail-endpoint`, three served | `HTTP 503` on one link |
-| `fail-all` | 503 on every link | `HTTP 503` on all four |
+| `fail-all` | 503 on every link | `HTTP 503` on every link |
+| `de-paged` | fuel-type answers in `--de-pages` pages | one file, every page's rows |
+| `de-401` | fuel-type rejects the key it is given | `HTTP 401` on that link only |
 
 Precedence runs broadest first: `fail-all`, then `fail-one`, then `html`,
-then `redirect`, then the empty payloads.
+then `redirect`, then the per-link behaviors - the Data Exchange key check and
+the empty payloads.
+
+The Data Exchange link needs no mode to check the key: an unkeyed request gets
+MISO's own 401 in every mode, because that is what the real API does. `de-401`
+is the other half - a key the API rejects.
 
 `ok` mode rewrites the `RefId` to `... rev 1`, `rev 2` and so on as it
 serves, so a running poller sees a live feed. `frozen` leaves the fixture

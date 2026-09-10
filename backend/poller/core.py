@@ -1,4 +1,4 @@
-"""Fetch four MISO public JSON endpoints and write them verbatim to data/raw/.
+"""Fetch MISO's live JSON endpoints and write them verbatim to data/raw/.
 
 The bytes MISO returns are the bytes written to disk; the RAG lane reads them
 and does everything downstream. Two exceptions to "verbatim": a shape gate that
@@ -64,9 +64,10 @@ DATA_EXCHANGE = "data_exchange"
 DE_PAGE_SIZE = 5000
 # Hard stop, so a server that never sets lastPage cannot loop or fill the disk.
 DE_MAX_PAGES = 5
-# One guard lease covers the endpoint, not each page, so the pacing between
-# pages is ours to enforce.
-DE_PAGE_PAUSE_SECONDS = 2
+# One guard lease covers the endpoint, not each page, so this pause is the only
+# thing holding a paged fetch to MISO's limit - hence the guard's own interval
+# rather than something smaller. _fetch_all_pages has the arithmetic.
+DE_PAGE_PAUSE_SECONDS = guard.MIN_SECONDS_BETWEEN
 
 DEFAULT_POLL_SECONDS = 300
 MIN_POLL_SECONDS = 5
@@ -575,19 +576,28 @@ def _fetch_all_pages(endpoint: Endpoint, url: str) -> dict:
     written as a single file, so data/raw/ stays one-file-per-endpoint.
 
     Each extra page is another request to the same link, and MISO allows about
-    one per endpoint per minute. DE_PAGE_SIZE is deliberately large so the
-    common case is a single request, and pages are paced apart. A truncated
-    fetch is recorded as a failure rather than passed off as complete - that
-    includes a response whose paging metadata is missing, which is malformed
-    rather than finished.
+    one per endpoint per minute. The rate guard cannot help: it leases per
+    link, and this whole fetch runs under one lease. So DE_PAGE_PAUSE_SECONDS
+    is what makes the limit true, and it is the guard's own
+    MIN_SECONDS_BETWEEN - a shorter pause would breach the very rule the guard
+    exists to keep, and the penalty is an IP ban we cannot undo.
+
+    The arithmetic works out. DE_PAGE_SIZE is large enough that one page is the
+    normal case, which pauses not at all; the worst case is DE_MAX_PAGES (5)
+    pages, so four pauses, 240 s, inside the 300 s cadence. And an overrun is
+    survivable anyway: the scheduled job is coalesce=True, max_instances=1, so
+    a cycle that runs long delays the next one instead of stacking on it.
+
+    A truncated fetch is recorded as a failure rather than passed off as
+    complete - that includes a response whose paging metadata is missing,
+    which is malformed rather than finished.
     """
     rows: list = []
     page_meta: dict = {}
     for page_number in range(1, DE_MAX_PAGES + 1):
         if page_number > 1:
-            # One guard lease covers the whole endpoint, so pacing here is what
-            # keeps a multi-page cycle from firing back-to-back requests at a
-            # link MISO limits to about one per minute.
+            # the one thing standing between a multi-page cycle and several
+            # back-to-back requests at a link limited to one per minute
             time.sleep(DE_PAGE_PAUSE_SECONDS)
         result = _fetch(endpoint, _page_url(url, page_number))
         if not result["ok"]:
@@ -779,7 +789,7 @@ def _write_status(directory: Path, observations: dict, base: str,
 
 
 def poll_once() -> dict:
-    """Fetch all four endpoints, validate, write files, update the status file.
+    """Fetch every active endpoint, validate, write files, update the status file.
 
     Returns the status dict that was written. If every endpoint was skipped by
     the rate guard, nothing is fetched or written and the previously stored
