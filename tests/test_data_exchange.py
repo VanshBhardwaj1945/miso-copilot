@@ -111,13 +111,49 @@ def test_the_data_exchange_host_is_overridable(monkeypatch):
 def test_date_is_substituted_in_fixed_est(monkeypatch):
     """MISO stamps market days in EST all year. A DST-aware zone asks for the
     wrong day for an hour each night - the same trap the as-of stamp avoids.
+
+    The date is the newest *published* market day, not today; see
+    test_the_date_asked_for_is_never_today.
     """
     de = core.DATA_EXCHANGE_ENDPOINTS[0]
     url = core.endpoint_url(de, "https://x")
     assert "{date}" not in url
+    assert core.market_date() in url
+
+
+# --- market date ---------------------------------------------------------
+
+def test_the_date_asked_for_is_never_today():
+    """MISO answers today with 400 `data not available yet for this market
+    date`: these endpoints publish a completed day at 2am EST the day after,
+    whatever the /real-time/ path suggests. Asking for today failed every
+    cycle until this was found against the live API.
+    """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    assert datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d") in url
+    today = datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d")
+    assert core.market_date() != today
+    assert today not in core.endpoint_url(core.DATA_EXCHANGE_ENDPOINTS[0], "https://x")
+
+
+@pytest.mark.parametrize("hour,expected", [
+    (0, "2026-09-08"), (1, "2026-09-08"),      # before 2am: yesterday is not published
+    (2, "2026-09-09"), (3, "2026-09-09"),      # from 2am: yesterday is available
+    (23, "2026-09-09"),
+])
+def test_the_publish_boundary_is_two_am_est(hour, expected):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, hour, 30, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(when) == expected
+
+
+def test_a_clock_in_another_zone_is_converted_not_assumed():
+    """01:30 UTC is still the previous evening in EST."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, 1, 30, tzinfo=ZoneInfo("UTC"))
+    assert core.market_date(when) == "2026-09-08"
 
 
 def test_a_path_without_a_date_is_left_alone():

@@ -19,7 +19,7 @@ import tempfile
 import time
 import zlib
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlsplit, urlunsplit
@@ -68,6 +68,9 @@ DE_MAX_PAGES = 5
 # thing holding a paged fetch to MISO's limit - hence the guard's own interval
 # rather than something smaller. _fetch_all_pages has the arithmetic.
 DE_PAGE_PAUSE_SECONDS = guard.MIN_SECONDS_BETWEEN
+# Data Exchange publishes a completed market day at 2am EST the day after, so
+# "today" is always a 400. See market_date().
+DE_PUBLISH_HOUR_EST = 2
 
 DEFAULT_POLL_SECONDS = 300
 MIN_POLL_SECONDS = 5
@@ -174,17 +177,29 @@ def endpoint_base(endpoint: Endpoint, public_base: str) -> str:
     return public_base
 
 
-def endpoint_url(endpoint: Endpoint, base: str) -> str:
-    """The full URL, with {date} filled in.
+def market_date(now: datetime | None = None) -> str:
+    """The newest market day Data Exchange will actually serve.
+
+    Not today. Despite the /real-time/ path these endpoints publish a completed
+    market day "at 2am EST the day after", and asking for today earns a 400 -
+    `Invalid date: data not available yet for this market date` - on every
+    cycle. So: yesterday, and the day before that until 2am EST, when
+    yesterday's has not been published yet either.
 
     Fixed EST, not America/New_York: MISO stamps its market days in EST all
-    year, so a DST-aware zone would ask for the wrong day for an hour each
-    night. Same reasoning as the "as of" stamp in routes/ask.py.
+    year, so a DST-aware zone would roll the date an hour early or late for
+    part of the year. Same reasoning as the "as of" stamp in routes/ask.py.
     """
+    est = (now or datetime.now(ZoneInfo("EST"))).astimezone(ZoneInfo("EST"))
+    back = 1 if est.hour >= DE_PUBLISH_HOUR_EST else 2
+    return (est - timedelta(days=back)).strftime("%Y-%m-%d")
+
+
+def endpoint_url(endpoint: Endpoint, base: str) -> str:
+    """The full URL, with {date} filled in."""
     path = endpoint.path
     if "{date}" in path:
-        path = path.replace("{date}",
-                            datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d"))
+        path = path.replace("{date}", market_date())
     return base + path
 
 

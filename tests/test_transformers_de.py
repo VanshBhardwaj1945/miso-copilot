@@ -107,6 +107,35 @@ def test_the_as_of_time_comes_from_the_interval():
     assert as_of == "2026-09-10 09:25:00.000"
 
 
+def test_the_as_of_is_a_timestamp_not_the_hour_number():
+    """timeInterval.value is "1".."24", the hour of the market day. Preferring
+    it over start produced an as-of of "24"."""
+    payload = {"data": [{"region": "NORTH", "totalMw": 100, "fuelTypes": {"wind": 100},
+                         "timeInterval": {"start": "2026-09-09T23:00:00",
+                                          "end": "2026-09-10T00:00:00", "value": "24"}}]}
+    _, as_of, _ = transform_de_fueltype(payload)
+    assert as_of == "2026-09-09T23:00:00"
+
+
+def test_the_prose_says_the_day_is_settled_not_live():
+    """Rule 5: staleness stays visible. This feed is never "right now", and the
+    /real-time/ path in the URL invites exactly that misreading."""
+    prose, _, _ = transform_de_fueltype({"data": [row("NORTH", 100, wind=100)]})
+    assert "completed market day" in prose
+    assert "not live output" in prose
+
+
+def test_the_footprint_warning_only_appears_when_a_footprint_row_does():
+    """MISO returns the three regions and no MISO-wide row, so warning about
+    double-counting one would describe data that is not there."""
+    three, _, _ = transform_de_fueltype({"data": [
+        row("NORTH", 1), row("CENTRAL", 1), row("SOUTH", 1)]})
+    assert "MISO overall" not in three
+    assert "three regions" in three
+    withtotal, _, _ = transform_de_fueltype({"data": [row("MISO", 3), row("NORTH", 1)]})
+    assert "do not add it" in withtotal
+
+
 def test_the_source_url_is_the_operation_that_produced_it():
     _, _, url = transform_de_fueltype({"data": [row("NORTH", 1)]})
     assert url == DATA_EXCHANGE_DOC_URL

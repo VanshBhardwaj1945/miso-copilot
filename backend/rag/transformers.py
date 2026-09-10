@@ -190,11 +190,19 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
     # every row of one fetch shares an interval; take it from any of them
     sample = next(iter(latest.values()))
     interval = sample.get("timeInterval") or {}
-    as_of = str(interval.get("value") or interval.get("start") or "").strip()
+    # "value" is the hour number ("1".."24"), not a timestamp - reading it as
+    # one produced an as-of of "24". "start" is the ISO interval start.
+    as_of = str(interval.get("start") or interval.get("end") or "").strip()
 
-    lines = [f"MISO generation by fuel type and region, from the MISO Data "
-             f"Exchange API (as of {as_of} EST):" if as_of else
-             "MISO generation by fuel type and region, from the MISO Data Exchange API:"]
+    # These endpoints publish a completed market day at 2am EST the day after,
+    # so this is never "right now" however the /real-time/ path reads. Saying so
+    # is the same duty as the as-of stamp: staleness stays visible.
+    lines = [f"MISO generation by fuel type and region for the completed market "
+             f"day, from the MISO Data Exchange API (interval starting "
+             f"{as_of} EST). This is a settled market day, not live output - "
+             f"for current generation use the real-time fuel mix." if as_of else
+             "MISO generation by fuel type and region for a completed market "
+             "day, from the MISO Data Exchange API."]
 
     # MISO first when present - it is the footprint total the others sum toward.
     # Anything MISO adds to the enum later is appended rather than dropped: a
@@ -219,6 +227,13 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
         else:
             lines.append(f"- {name}: {total:,.0f} MW total.")
 
-    lines.append("Regions are MISO North, Central and South; \"MISO overall\" is "
-                 "the whole footprint, so do not add it to the three regions.")
+    # Only warn about the footprint total when one is actually present: MISO
+    # returns the three regions and no MISO-wide row, so the warning would
+    # otherwise describe data that is not there.
+    if "MISO" in latest:
+        lines.append("\"MISO overall\" is the whole footprint, so do not add it "
+                     "to the three regions.")
+    else:
+        lines.append("These are MISO's three regions - North, Central and South. "
+                     "Their sum is the footprint total.")
     return "\n".join(lines), as_of, DATA_EXCHANGE_DOC_URL
