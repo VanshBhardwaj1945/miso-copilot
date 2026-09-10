@@ -17,11 +17,13 @@ from a clone rather than a build step they have to remember.
 
 import datetime
 import re
-import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 
 import requests
+# defusedxml, not stdlib ElementTree: this parses XML fetched over the network,
+# and the stdlib parser expands entities (billion laughs, external refs).
+from defusedxml.ElementTree import fromstring as xml_fromstring
 
 SITEMAP_URL = "https://www.misoenergy.org/sitemap.xml"
 OUT_PATH = Path(__file__).resolve().parent / "site_index.md"
@@ -60,7 +62,7 @@ def fetch_sitemap(url: str = SITEMAP_URL) -> list[str]:
     resp = requests.get(url, timeout=TIMEOUT,
                         headers={"User-Agent": "miso-copilot/1.0 (site index builder)"})
     resp.raise_for_status()
-    root = ET.fromstring(resp.content)
+    root = xml_fromstring(resp.content)
     # the sitemap namespace is declared on the root; match on the tag's suffix
     return [el.text.strip() for el in root.iter()
             if el.tag.endswith("loc") and el.text]
