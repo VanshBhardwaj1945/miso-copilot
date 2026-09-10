@@ -42,6 +42,7 @@ export default function MisoRamen() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [size, setSize] = useState(DEFAULT_SIZE);
+  const [showGreeting, setShowGreeting] = useState(false);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -50,6 +51,30 @@ export default function MisoRamen() {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (isOpen || !showGreeting) return;
+
+    let timeout;
+
+    const dismissGreeting = () => {
+      // Wait 3 seconds before hiding the dialogue
+      clearTimeout(timeout);
+
+      timeout = setTimeout(() => {
+        setShowGreeting(false);
+      }, 500);
+    };
+
+    window.addEventListener("scroll", dismissGreeting);
+    document.addEventListener("pointerdown", dismissGreeting);
+
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener("scroll", dismissGreeting);
+      document.removeEventListener("pointerdown", dismissGreeting);
+    };
+  }, [isOpen, showGreeting]);
 
   // Drag handler for the top-left grip: the panel is anchored bottom-right,
   // so moving the pointer up/left grows it.
@@ -154,15 +179,35 @@ export default function MisoRamen() {
     <>
       {/* Floating launcher, shown only while the panel is closed. */}
       {!isOpen && (
-        <button
-          className="miso-ramen-launcher"
-          onClick={() => setIsOpen(true)}
-          aria-label="Open MISO Ramen"
-        >
-          <span className="miso-ramen-sparkle" aria-hidden="true">
-            <img src={launcher_logo} alt="" />
-          </span>
-        </button>
+        <div className="miso-ramen-launcher-container">
+
+          {showGreeting && (
+            <div className="miso-ramen-dialog">
+              <div className="miso-ramen-dialog-title">
+                👋 Hi! I'm MISO Ramen
+              </div>
+
+              <div className="miso-ramen-dialog-text">
+                MISO's Information Assistant
+              </div>
+
+              <div className="miso-ramen-dialog-hint">
+                Ask me about MISO data, market information, reports, and processes.
+              </div>
+            </div>
+          )}
+
+          <button
+            className="miso-ramen-launcher"
+            onClick={() => setIsOpen(true)}
+            aria-label="Open MISO Ramen — MISO Information Assistant"
+          >
+            <span className="miso-ramen-sparkle" aria-hidden="true">
+              <img src={launcher_logo} alt="" />
+            </span>
+          </button>
+
+        </div>
       )}
 
       {isOpen && (
@@ -192,7 +237,10 @@ export default function MisoRamen() {
             </div>
             <button
               className="miso-ramen-close"
-              onClick={() => setIsOpen(false)}
+              onClick={() => {
+                setIsOpen(false);
+                setShowGreeting(true);
+              }}
               aria-label="Close MISO Ramen"
             >
               ×
