@@ -169,11 +169,35 @@ def test_a_path_without_a_date_is_left_alone():
 ])
 def test_shape_gate_rejects_anything_without_regions(body):
     """The point of this endpoint is region. A payload without it is not it."""
-    assert core._shape_de_fueltype(body) is False
+    assert core._shape_de_regional(body) is False
+
+
+def test_one_gate_serves_every_region_endpoint():
+    """The twelve operations differ in their value fields - load, nsi, supply,
+    mustRun - but share the {data, page} envelope and a region on every row."""
+    for values in ({"load": 1.0}, {"nsi": -2.0}, {"supply": 3.0},
+                   {"mustRun": 1, "economic": 2, "emergency": 3},
+                   {"fuelTypes": {"wind": 5.0}, "totalMw": 5.0}):
+        body = {"data": [{"region": "NORTH", **values}], "page": {"lastPage": True}}
+        assert core._shape_de_regional(body) is True
+
+
+def test_every_registered_endpoint_has_a_transformer():
+    """A polled endpoint with no ingest entry writes a file nothing reads."""
+    from backend.rag.ingest_api import ENDPOINTS_CONFIG
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        assert f"{endpoint.key}.json" in ENDPOINTS_CONFIG, endpoint.key
+
+
+def test_every_registered_endpoint_is_region_scoped_and_dated():
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        assert "{date}" in endpoint.path, endpoint.key
+        assert endpoint.path.startswith("/lgi/"), endpoint.key
+        assert endpoint.paged is True, endpoint.key
 
 
 def test_shape_gate_accepts_a_real_page():
-    assert core._shape_de_fueltype(page(ROWS)) is True
+    assert core._shape_de_regional(page(ROWS)) is True
 
 
 # --- paging --------------------------------------------------------------

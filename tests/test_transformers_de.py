@@ -140,3 +140,95 @@ def test_the_source_url_is_the_operation_that_produced_it():
     _, _, url = transform_de_fueltype({"data": [row("NORTH", 1)]})
     assert url == DATA_EXCHANGE_DOC_URL
     assert "generation-fuel-type" in url
+
+
+# --- the generic region transformer ---------------------------------------
+
+from backend.rag.transformers import (  # noqa: E402
+    _numeric_summary,
+    make_de_transformer,
+)
+
+URL = "https://data-exchange.misoenergy.org/x"
+
+
+def de_row(region, when="2026-09-09T23:00:00", **values):
+    return {"timeInterval": {"start": when, "end": when, "value": "24"},
+            "region": region, **values}
+
+
+def test_one_transformer_serves_every_value_shape():
+    """The eleven endpoints differ in their fields - load, nsi, supply,
+    mustRun - which is why they share a generic transformer instead of eleven
+    near-identical ones."""
+    for values, expected in (
+        ({"load": 17615.0}, "load 17,615 MW"),
+        ({"nsi": -2088.0}, "net scheduled interchange -2,088 MW"),
+        ({"supply": 3421.0}, "cleared supply 3,421 MW"),
+        ({"mustRun": 10.0, "economic": 20.0}, "must-run 10 MW"),
+        ({"loadForecast": 500.0}, "load forecast 500 MW"),
+    ):
+        fn = make_de_transformer("thing", URL)
+        prose, _, _ = fn({"data": [de_row("NORTH", **values)]})
+        assert expected in prose, values
+
+
+def test_a_nested_fuel_breakdown_is_flattened():
+    fn = make_de_transformer("day-ahead generation by fuel type", URL)
+    prose, _, _ = fn({"data": [de_row("SOUTH", fuelTypes={"wind": 228.0, "coal": 0},
+                                      totalMw=26858.0)]})
+    assert "wind 228 MW" in prose
+    assert "coal" not in prose          # zero values are noise, not information
+    assert "total 26,858 MW" in prose
+
+
+def test_bookkeeping_fields_are_not_reported_as_megawatts():
+    """region/interval/init are row metadata; printing them as MW would be
+    confidently wrong rather than merely untidy."""
+    summary = _numeric_summary({"region": "NORTH", "interval": "24", "init": "5",
+                                "localResourceZone": "LRZ1", "load": 100.0})
+    assert summary == "load 100 MW"
+
+
+def test_the_newest_interval_wins_here_too():
+    fn = make_de_transformer("actual load", URL)
+    prose, as_of, _ = fn({"data": [
+        de_row("NORTH", when="2026-09-09T01:00:00", load=1.0),
+        de_row("NORTH", when="2026-09-09T23:00:00", load=999.0),
+    ]})
+    assert "load 999 MW" in prose
+    assert as_of == "2026-09-09T23:00:00"
+
+
+def test_every_region_present_is_reported():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row(r, load=1.0)
+                               for r in ("NORTH", "CENTRAL", "SOUTH")]})
+    for name in ("MISO North", "MISO Central", "MISO South"):
+        assert name in prose
+
+
+def test_the_prose_says_the_day_is_settled():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=1.0)]})
+    assert "completed market day" in prose and "not live output" in prose
+
+
+def test_a_region_with_no_numeric_fields_still_appears():
+    fn = make_de_transformer("thing", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH")]})
+    assert "no values reported" in prose
+
+
+@pytest.mark.parametrize("payload", [{}, {"data": []}, {"data": None}, "nonsense"])
+def test_no_data_says_so(payload):
+    fn = make_de_transformer("actual load", URL)
+    prose, as_of, url = fn(payload)
+    assert "No MISO Data Exchange data is available for actual load" in prose
+    assert as_of == "" and url == URL
+
+
+def test_the_title_names_the_endpoint():
+    fn = make_de_transformer("day-ahead net scheduled interchange", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", nsi=1.0)]})
+    assert "day-ahead net scheduled interchange" in prose

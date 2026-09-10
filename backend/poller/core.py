@@ -128,8 +128,12 @@ ENDPOINTS = [
 ]
 
 
-def _shape_de_fueltype(body: object) -> bool:
-    """A Data Exchange page: {"data": [...], "page": {...}} with rows that name a region."""
+def _shape_de_regional(body: object) -> bool:
+    """A Data Exchange page: {"data": [...], "page": {...}} with rows that name a region.
+
+    Every region-scoped operation shares this envelope, whatever value fields
+    the rows carry, so one gate serves all twelve.
+    """
     if not isinstance(body, dict) or not isinstance(body.get("data"), list):
         return False
     rows = body["data"]
@@ -140,10 +144,30 @@ def _shape_de_fueltype(body: object) -> bool:
 
 # Data Exchange endpoints are registered only when a subscription key exists;
 # see active_endpoints(). {date} is filled per cycle in fixed EST.
+# The twelve Load/Generation/Interchange operations that carry `region`. The
+# other twenty on the portal do not: Pricing is node- and zone-scoped, and a
+# reserve zone is not North/Central/South.
 DATA_EXCHANGE_ENDPOINTS = [
-    Endpoint("DEFuelMix", "/lgi/v1/real-time/{date}/generation/fuel-type",
-             _shape_de_fueltype, None,
-             source=DATA_EXCHANGE, paged=True),
+    Endpoint(key, path, _shape_de_regional, None,
+             source=DATA_EXCHANGE, paged=True)
+    for key, path in (
+        ("DEFuelMix", "/lgi/v1/real-time/{date}/generation/fuel-type"),
+        ("DEActualLoad", "/lgi/v1/real-time/{date}/demand/actual"),
+        ("DEFuelOnMargin", "/lgi/v1/real-time/{date}/generation/fuel-on-the-margin"),
+        ("DEDayAheadDemand", "/lgi/v1/day-ahead/{date}/demand"),
+        ("DEDayAheadFuelMix", "/lgi/v1/day-ahead/{date}/generation/fuel-type"),
+        ("DEClearedPhysical", "/lgi/v1/day-ahead/{date}/generation/cleared/physical"),
+        ("DEClearedVirtual", "/lgi/v1/day-ahead/{date}/generation/cleared/virtual"),
+        ("DEOfferedEcoMax", "/lgi/v1/day-ahead/{date}/generation/offered/ecomax"),
+        ("DEOfferedEcoMin", "/lgi/v1/day-ahead/{date}/generation/offered/ecomin"),
+        ("DENetScheduled", "/lgi/v1/day-ahead/{date}/interchange/net-scheduled"),
+        ("DELoadForecast", "/lgi/v1/forecast/{date}/load"),
+        # forecast/{date}/outage is the twelfth region-scoped operation and is
+        # deliberately absent: it answered 404 "Empty data returned for date"
+        # for every day tested between 2026-09-03 and 2026-09-09. MISO is not
+        # publishing it. Polling it would leave a permanent failure in the
+        # status file and hide a real one; add the line back if it starts.
+    )
 ]
 
 

@@ -237,3 +237,73 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
         lines.append("These are MISO's three regions - North, Central and South. "
                      "Their sum is the footprint total.")
     return "\n".join(lines), as_of, DATA_EXCHANGE_DOC_URL
+
+
+# --- the rest of the region-capable Data Exchange endpoints -----------------
+
+# Every one of these returns rows of {timeInterval, region, ...values}, but the
+# value fields differ per endpoint - load, nsi, supply, mustRun/economic/
+# emergency, and so on. Rather than eleven near-identical transformers, one
+# generic one reports whatever numeric fields a row carries, with labels a
+# person would recognize.
+_FIELD_LABELS = {
+    "load": "load", "nsi": "net scheduled interchange", "supply": "cleared supply",
+    "fixed": "fixed demand", "priceSens": "price-sensitive demand",
+    "virtual": "virtual demand", "mustRun": "must-run", "economic": "economic",
+    "emergency": "emergency", "loadForecast": "load forecast",
+    "unitCount": "units", "peak": "peak", "totalMw": "total",
+}
+_SKIP_FIELDS = {"region", "interval", "init", "localResourceZone", "fuelType"}
+
+
+def _humanize(field: str) -> str:
+    return _FIELD_LABELS.get(field, field)
+
+
+def _numeric_summary(row: dict) -> str:
+    """The row's numeric fields as "label 1,234 MW" phrases."""
+    parts = []
+    for key, value in row.items():
+        if key in _SKIP_FIELDS or key == "timeInterval":
+            continue
+        if key == "fuelTypes" and isinstance(value, dict):
+            for fuel, mw in value.items():
+                amount = _safe_float(mw)
+                if amount > 0:
+                    parts.append(f"{_FUEL_NAMES.get(fuel, fuel)} {amount:,.0f} MW")
+            continue
+        if isinstance(value, (int, float)) or (
+                isinstance(value, str) and value.replace(".", "", 1).lstrip("-").isdigit()):
+            parts.append(f"{_humanize(key)} {_safe_float(value):,.0f} MW")
+    return ", ".join(parts)
+
+
+def make_de_transformer(title: str, doc_url: str):
+    """A transformer for one region-scoped Data Exchange endpoint.
+
+    Same contract as every other transformer: (data) -> (prose, as_of, url).
+    Reports the newest interval for each region, because a day's fetch holds
+    every interval and only the newest is the end state of that market day.
+    """
+    def transform(data: dict) -> tuple[str, str, str]:
+        rows = data.get("data") if isinstance(data, dict) else None
+        latest = _latest_row_per_region(rows or [])
+        if not latest:
+            return (f"No MISO Data Exchange data is available for {title}.", "", doc_url)
+
+        sample = next(iter(latest.values()))
+        interval = sample.get("timeInterval") or {}
+        as_of = str(interval.get("start") or interval.get("end") or "").strip()
+
+        lines = [f"MISO {title} by region for the completed market day, from the "
+                 f"MISO Data Exchange API"
+                 + (f" (interval starting {as_of} EST)" if as_of else "")
+                 + ". This is a settled market day, not live output."]
+        known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
+        order = [r for r in known if r in latest] + sorted(set(latest) - set(known))
+        for code in order:
+            summary = _numeric_summary(latest[code])
+            name = _REGION_NAMES.get(code, code)
+            lines.append(f"- {name}: {summary}." if summary else f"- {name}: no values reported.")
+        return "\n".join(lines), as_of, doc_url
+    return transform

@@ -16,7 +16,11 @@ from llama_index.core.vector_stores import (
 
 from backend.rag.store import get_index
 
-LIVE_TOP_K = 2   # there are only four snapshots; two covers any one question
+# Was 2, when there were four snapshots and two covered any question. With the
+# twelve region-scoped Data Exchange feeds there are sixteen, and a question
+# about one region had to out-rank fifteen unrelated snapshots for two seats.
+# Four costs about a tenth of a cent per question in prompt tokens.
+LIVE_TOP_K = 4
 DOC_TOP_K = 4    # the 512-token chunks, same budget as before the doc lane
 
 

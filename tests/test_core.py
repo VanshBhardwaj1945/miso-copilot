@@ -1955,12 +1955,15 @@ def test_the_paged_endpoint_claims_one_lease_for_the_whole_cycle(raw, de_stub,
     monkeypatch.setattr(guard, "claim", counting_claim)
     status = core.poll_once()
 
-    assert core.succeeded_count(status) == 5
-    de_claims = [url for url in claimed if "generation/fuel-type" in url]
+    # one claim for THIS link, however many pages it took. Scoped to the
+    # real-time path because the stub also serves the day-ahead fuel-type
+    # link, and one claim each is exactly right.
+    de_claims = [u for u in claimed if "real-time" in u and "generation/fuel-type" in u]
     assert len(de_claims) == 1
     # the link, not a page of it: the guard key must not vary per page
     assert "pageNumber" not in de_claims[0]
-    assert len(claimed) == len(LEGACY_KEYS) + 1
+    # and every endpoint in the cycle claimed exactly once
+    assert len(claimed) == len(set(claimed)) == len(core.active_endpoints())
 
 
 def test_the_subscription_key_is_sent_as_the_apim_header(raw, de_stub):

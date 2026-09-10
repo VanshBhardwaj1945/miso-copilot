@@ -8,7 +8,9 @@ from typing import Any, Callable
 from llama_index.core.schema import Document
 
 from backend.rag.store import get_chroma_collection, get_index
+from backend.rag.transformers import DATA_EXCHANGE_DOC_URL
 from backend.rag.transformers import (
+    make_de_transformer,
     transform_de_fueltype,
     transform_fuelmix,
     transform_load,
@@ -34,7 +36,25 @@ ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] =
     "WindSolar.json": ("miso_snapshot_windsolar", transform_windsolar),
     # Data Exchange, present only once a subscription key is configured. Same
     # treatment as the four above: one fixed doc id, overwritten each cycle.
+    # fuel-type gets its own transformer because a fuelTypes breakdown reads
+    # better than a flat list; the rest share the generic one.
     "DEFuelMix.json": ("miso_snapshot_de_fueltype", transform_de_fueltype),
+    **{
+        f"{key}.json": (f"miso_snapshot_{key.lower()}",
+                        make_de_transformer(title, DATA_EXCHANGE_DOC_URL))
+        for key, title in (
+            ("DEActualLoad", "actual load"),
+            ("DEFuelOnMargin", "fuel on the margin"),
+            ("DEDayAheadDemand", "day-ahead cleared demand"),
+            ("DEDayAheadFuelMix", "day-ahead generation by fuel type"),
+            ("DEClearedPhysical", "day-ahead cleared physical generation"),
+            ("DEClearedVirtual", "day-ahead cleared virtual generation"),
+            ("DEOfferedEcoMax", "day-ahead offered generation (economic maximum)"),
+            ("DEOfferedEcoMin", "day-ahead offered generation (economic minimum)"),
+            ("DENetScheduled", "day-ahead net scheduled interchange"),
+            ("DELoadForecast", "medium-term load forecast"),
+        )
+    },
 }
 
 
