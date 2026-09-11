@@ -486,3 +486,23 @@ def test_a_single_row_region_does_not_restate_itself_as_a_total():
     fn = make_de_transformer("actual load", URL)
     prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
     assert "in total" not in prose
+
+
+def test_a_feed_with_an_unassigned_row_says_it_is_not_one_of_the_three():
+    """Four of the six feeds this transformer serves carry a NO_REGION row.
+    The fuel-type feed has no such row and says its three regions sum to the
+    footprint - that sentence travels, and dropping 11,113 MW of virtual
+    demand out of a total is a silent wrong answer."""
+    fn = make_de_transformer("day-ahead cleared demand", URL)
+    prose, _, _ = fn({"data": [
+        de_row("CENTRAL", virtual=100.0),
+        de_row("NO_REGION", virtual=11113.0),
+    ]})
+    assert "not part of North, Central or South" in prose
+    assert "never drop it from a total" in prose
+
+
+def test_a_feed_without_one_stays_quiet_about_it():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("CENTRAL", load=100.0)]})
+    assert "Unassigned to a region" not in prose

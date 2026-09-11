@@ -61,6 +61,18 @@ ACRONYMS = {
 }
 
 
+# The sitemap carries names and URLs but no job titles, so "who is MISO's
+# CEO?" retrieved a list of bare names and was declined - while the 2026
+# Region Reliability Imperative sitting in data/docs/ is signed by him. Only
+# add an entry here when a document in the corpus states the role, and say
+# which document, so the claim travels with its source.
+KNOWN_ROLES = {
+    "john-r-bear": ("President and Chief Executive Officer",
+                    "signed as such in MISO's 2026 Region Reliability "
+                    "Imperative report, February 2026"),
+}
+
+
 def read_sitemap(path: Path = SITEMAP_PATH) -> list[str]:
     """Every URL in the saved sitemap export.
 
@@ -138,7 +150,12 @@ def build(urls: list[str]) -> tuple[str, int]:
         for parts, url in sorted(sections[section], key=lambda t: t[1]):
             name = label(parts[-1]) if len(parts) > 1 else label(parts[0])
             trail = " > ".join(label(p) for p in parts[:-1]) or "top level"
-            lines.append(f"- **{name}** - {trail} - {url}")
+            role = KNOWN_ROLES.get(parts[-1])
+            if role:
+                lines.append(f"- **{name}** - {role[0]} of MISO - {trail} - "
+                             f"{url} ({role[1]})")
+            else:
+                lines.append(f"- **{name}** - {trail} - {url}")
             count += 1
         lines.append("")
     return "\n".join(lines) + "\n", count

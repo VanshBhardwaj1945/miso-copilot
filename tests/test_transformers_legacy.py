@@ -241,7 +241,7 @@ def test_the_load_forecast_reports_the_days_peak_not_hour_one():
             {"Forecast": {"HourEnding": "1", "LoadForecast": "78103"}},
             {"Forecast": {"HourEnding": "17", "LoadForecast": "98729"}},
         ]}})
-    assert "Day-Ahead Forecast Peak: 98,729 MW (Hour Ending 17)" in prose
+    assert "Day-Ahead Forecast Peak: 98,729 MW in the hour ending 5 PM EST" in prose
     assert "78,103" not in prose
 
 
@@ -251,10 +251,72 @@ def test_the_solar_forecast_is_the_peak_not_midnight():
     from backend.rag.transformers import transform_windsolar
     prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
         {"ActualDateTimeEST": "2026-09-10 12:00:00 AM", "ActualWindValue": "100",
-         "ActualSolarValue": "0", "ForecastWindValue": "200", "ForecastSolarValue": "0"},
+         "ActualSolarValue": "0", "ForecastDateTimeEST": "2026-09-10 00:00:00",
+         "ForecastHourEndingEST": "1", "ForecastWindValue": "200",
+         "ForecastSolarValue": "0"},
         {"ActualDateTimeEST": "2026-09-10 1:00:00 PM", "ActualWindValue": "300",
-         "ActualSolarValue": "2074", "ForecastWindValue": "400",
+         "ActualSolarValue": "2074", "ForecastDateTimeEST": "2026-09-10 12:00:00",
+         "ForecastHourEndingEST": "13", "ForecastWindValue": "400",
          "ForecastSolarValue": "15687"},
     ]})
-    assert "Peak Solar: 15,687.0 MW" in prose
+    assert "Forecast Peak Solar, 2026-09-10: 15,687.0 MW" in prose
     assert "Forecasted Solar: 0.0 MW" not in prose
+
+
+def test_the_wind_forecast_peak_is_reported_per_day():
+    """The feed carries 48 rows - today and tomorrow. One peak across both
+    reported tomorrow's 19,904 MW as today's, and a grid operator knows their
+    own forecast."""
+    from backend.rag.transformers import transform_windsolar
+    prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
+        {"ForecastDateTimeEST": "2026-09-10 23:00:00", "ForecastHourEndingEST": "24",
+         "ForecastWindValue": "13561", "ForecastSolarValue": "0"},
+        {"ForecastDateTimeEST": "2026-09-11 22:00:00", "ForecastHourEndingEST": "23",
+         "ForecastWindValue": "19904", "ForecastSolarValue": "0"},
+    ]})
+    assert "Forecast Peak Wind, 2026-09-10: 13,561.0 MW, in the hour ending midnight EST" in prose
+    assert "Forecast Peak Wind, 2026-09-11: 19,904.0 MW, in the hour ending 11 PM EST" in prose
+    assert "two forecast days" in prose
+
+
+def test_the_fuel_mix_total_is_not_called_generation():
+    """Imports is a line item inside TotalMW. Read as generation, it invited
+    adding imports on top - which answered a Maximum Generation risk question
+    with "covering load with room to spare" while supply was under load."""
+    from backend.rag.transformers import transform_fuelmix
+    prose, _, _ = transform_fuelmix({"RefId": "r", "TotalMW": "91,307", "Fuel": {"Type": [
+        {"CATEGORY": "Coal", "ACT": "33,745"},
+        {"CATEGORY": "Imports", "ACT": "3,355"},
+    ]}})
+    assert "Total Supply (own generation plus imports): 91,307 MW" in prose
+    assert "Total Grid Generation" not in prose
+    assert "already counted inside the total supply" in prose
+
+
+def test_the_fuel_type_footprint_claim_is_scoped_to_its_own_feed():
+    """It used to read as a general rule about MISO's regions, and the other
+    Data Exchange feeds do carry an unassigned row."""
+    from backend.rag.transformers import transform_de_fueltype
+    prose, _, _ = transform_de_fueltype({"data": [
+        {"timeInterval": {"start": "2026-09-09T23:00:00"}, "region": "NORTH",
+         "fuelTypes": {"coal": 100.0}, "totalMw": 100.0},
+    ]})
+    assert "footprint total for this fuel-type feed" in prose
+    assert "do not carry this sentence over to them" in prose
+
+
+@pytest.mark.parametrize("hour,expected", [
+    ("1", "1 AM"), ("11", "11 AM"), ("12", "noon"), ("13", "1 PM"),
+    ("17", "5 PM"), ("23", "11 PM"), ("24", "midnight"),
+])
+def test_an_hour_ending_reads_as_a_clock_time(hour, expected):
+    """MISO counts hours 1-24. "HE 24" is trading-floor shorthand and "hour
+    ending 24" reads like a 24th hour no clock has."""
+    from backend.rag.transformers import _hour_ending
+    assert _hour_ending(hour) == expected
+
+
+@pytest.mark.parametrize("bad", ["", "0", "25", "abc", None])
+def test_an_unusable_hour_is_omitted_rather_than_guessed(bad):
+    from backend.rag.transformers import _hour_ending
+    assert _hour_ending(bad) == ""
