@@ -315,7 +315,10 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
                      "to the three regions.")
     else:
         lines.append("These are MISO's three regions - North, Central and South. "
-                     "Their sum is the footprint total.")
+                     "Their sum is the footprint total for this fuel-type feed. "
+                     "Other Data Exchange feeds carry an additional \"unassigned "
+                     "to a region\" row that belongs to none of the three - do "
+                     "not carry this sentence over to them.")
     return "\n".join(lines), as_of, DATA_EXCHANGE_DOC_URL
 
 
@@ -574,5 +577,16 @@ def make_de_transformer(title: str, doc_url: str, kind: str = "settled"):
             if day:
                 line += f" Across the day, {day}."
             lines.append(line)
+        if "NO_REGION" in latest:
+            # Four of the six feeds this transformer serves carry this row, and
+            # it is not part of any region. The fuel-type feed has no such row
+            # and says its three regions sum to the footprint - that sentence
+            # travels, and dropping 11,113 MW of virtual demand from a total is
+            # a silent wrong answer.
+            lines.append("\"Unassigned to a region\" is a real row in this feed "
+                         "and is not part of North, Central or South. Report it "
+                         "alongside them, never drop it from a total, and do not "
+                         "say the three regions sum to the footprint while it is "
+                         "present.")
         return "\n".join(lines), as_of, doc_url
     return transform

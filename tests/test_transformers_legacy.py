@@ -291,3 +291,15 @@ def test_the_fuel_mix_total_is_not_called_generation():
     assert "Total Supply (own generation plus imports): 91,307 MW" in prose
     assert "Total Grid Generation" not in prose
     assert "already counted inside the total supply" in prose
+
+
+def test_the_fuel_type_footprint_claim_is_scoped_to_its_own_feed():
+    """It used to read as a general rule about MISO's regions, and the other
+    Data Exchange feeds do carry an unassigned row."""
+    from backend.rag.transformers import transform_de_fueltype
+    prose, _, _ = transform_de_fueltype({"data": [
+        {"timeInterval": {"start": "2026-09-09T23:00:00"}, "region": "NORTH",
+         "fuelTypes": {"coal": 100.0}, "totalMw": 100.0},
+    ]})
+    assert "footprint total for this fuel-type feed" in prose
+    assert "do not carry this sentence over to them" in prose
