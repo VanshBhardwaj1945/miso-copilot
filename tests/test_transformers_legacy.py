@@ -251,10 +251,43 @@ def test_the_solar_forecast_is_the_peak_not_midnight():
     from backend.rag.transformers import transform_windsolar
     prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
         {"ActualDateTimeEST": "2026-09-10 12:00:00 AM", "ActualWindValue": "100",
-         "ActualSolarValue": "0", "ForecastWindValue": "200", "ForecastSolarValue": "0"},
+         "ActualSolarValue": "0", "ForecastDateTimeEST": "2026-09-10 00:00:00",
+         "ForecastHourEndingEST": "1", "ForecastWindValue": "200",
+         "ForecastSolarValue": "0"},
         {"ActualDateTimeEST": "2026-09-10 1:00:00 PM", "ActualWindValue": "300",
-         "ActualSolarValue": "2074", "ForecastWindValue": "400",
+         "ActualSolarValue": "2074", "ForecastDateTimeEST": "2026-09-10 12:00:00",
+         "ForecastHourEndingEST": "13", "ForecastWindValue": "400",
          "ForecastSolarValue": "15687"},
     ]})
-    assert "Peak Solar: 15,687.0 MW" in prose
+    assert "Forecast Peak Solar, 2026-09-10: 15,687.0 MW" in prose
     assert "Forecasted Solar: 0.0 MW" not in prose
+
+
+def test_the_wind_forecast_peak_is_reported_per_day():
+    """The feed carries 48 rows - today and tomorrow. One peak across both
+    reported tomorrow's 19,904 MW as today's, and a grid operator knows their
+    own forecast."""
+    from backend.rag.transformers import transform_windsolar
+    prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
+        {"ForecastDateTimeEST": "2026-09-10 23:00:00", "ForecastHourEndingEST": "24",
+         "ForecastWindValue": "13561", "ForecastSolarValue": "0"},
+        {"ForecastDateTimeEST": "2026-09-11 22:00:00", "ForecastHourEndingEST": "23",
+         "ForecastWindValue": "19904", "ForecastSolarValue": "0"},
+    ]})
+    assert "Forecast Peak Wind, 2026-09-10: 13,561.0 MW (hour ending 24 EST)" in prose
+    assert "Forecast Peak Wind, 2026-09-11: 19,904.0 MW (hour ending 23 EST)" in prose
+    assert "two forecast days" in prose
+
+
+def test_the_fuel_mix_total_is_not_called_generation():
+    """Imports is a line item inside TotalMW. Read as generation, it invited
+    adding imports on top - which answered a Maximum Generation risk question
+    with "covering load with room to spare" while supply was under load."""
+    from backend.rag.transformers import transform_fuelmix
+    prose, _, _ = transform_fuelmix({"RefId": "r", "TotalMW": "91,307", "Fuel": {"Type": [
+        {"CATEGORY": "Coal", "ACT": "33,745"},
+        {"CATEGORY": "Imports", "ACT": "3,355"},
+    ]}})
+    assert "Total Supply (own generation plus imports): 91,307 MW" in prose
+    assert "Total Grid Generation" not in prose
+    assert "already counted inside the total supply" in prose

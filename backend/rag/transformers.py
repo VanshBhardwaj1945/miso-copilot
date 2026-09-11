@@ -35,7 +35,12 @@ def transform_fuelmix(data: dict) -> tuple[str, str, str]:
 
     lines = [
         f"MISO Real-Time Generation Fuel Mix (as of {ref_id}):",
-        f"- Total Grid Generation: {total_mw:,.0f} MW",
+        # "Total Grid Generation" was a mislabel: Imports is one of the line
+        # items below and is already inside this number. Read as generation, it
+        # invited adding imports on top - which answered a Maximum Generation
+        # risk question with "covering load with room to spare" when supply was
+        # actually 1,500 MW under load.
+        f"- Total Supply (own generation plus imports): {total_mw:,.0f} MW",
     ]
 
     for item in fuels:
@@ -45,6 +50,10 @@ def transform_fuelmix(data: dict) -> tuple[str, str, str]:
         pct = (act_mw / total_mw * 100.0) if total_mw > 0 else 0.0
         lines.append(f"- {category}: {act_mw:,.0f} MW ({pct:.1f}%)")
 
+    lines.append("Imports above are already counted inside the total supply; "
+                 "never add them to it, and never describe them as covering a "
+                 "gap between that total and demand. The percentages are shares "
+                 "of total supply, not of MISO's own generation.")
     lines.append(f"Source: MISO Fuel Mix Feed ({MISO_DISPLAY_URL})")
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
 
@@ -154,19 +163,30 @@ def transform_windsolar(data: dict) -> tuple[str, str, str]:
         lines.append(f"- Latest Actual Wind Output: {w_val:,.1f} MW (recorded {ts})")
         lines.append(f"- Latest Actual Solar Output: {s_val:,.1f} MW (recorded {ts})")
 
-    if instances:
-        # instances[0] is midnight, so this printed "Day-Ahead Forecasted
-        # Solar: 0.0 MW" directly beneath an evening actual of 2,074 MW - an
-        # attendee reads that as MISO forecasting no solar. The forecast is a
-        # curve; its peak is the number that means something.
-        peak_w = max((_safe_float(r.get("ForecastWindValue", 0)) for r in instances),
-                     default=0.0)
-        peak_s = max((_safe_float(r.get("ForecastSolarValue", 0)) for r in instances),
-                     default=0.0)
-        lines.append(f"- Day-Ahead Forecast Peak Wind: {peak_w:,.1f} MW "
-                     f"(highest hour of the forecast day)")
-        lines.append(f"- Day-Ahead Forecast Peak Solar: {peak_s:,.1f} MW "
-                     f"(highest hour of the forecast day; solar is zero overnight)")
+    # This feed carries TWO forecast days - 48 rows, today and tomorrow. Taking
+    # a single peak across all of them reported tomorrow's 19,904 MW as today's
+    # wind peak when today's was 13,561, and a grid operator knows their own
+    # forecast. instances[0] was worse in the other direction: it is midnight,
+    # so solar read "0.0 MW" beneath an evening actual. Peak per day, dated.
+    by_day: dict = {}
+    for row in instances:
+        day = str(row.get("ForecastDateTimeEST") or "")[:10]
+        if not day:
+            continue
+        hour = row.get("ForecastHourEndingEST", "")
+        best = by_day.setdefault(day, {"wind": (0.0, ""), "solar": (0.0, "")})
+        for field, key in (("ForecastWindValue", "wind"), ("ForecastSolarValue", "solar")):
+            value = _safe_float(row.get(field, 0))
+            if value > best[key][0]:
+                best[key] = (value, hour)
+    for day in sorted(by_day):
+        for key, label in (("wind", "Wind"), ("solar", "Solar")):
+            value, hour = by_day[day][key]
+            lines.append(f"- Forecast Peak {label}, {day}: {value:,.1f} MW "
+                         f"(hour ending {hour} EST)")
+    if by_day:
+        lines.append("This feed carries two forecast days. Do not report a peak "
+                     "as today's without matching the date above.")
 
     lines.append(f"Source: MISO Wind & Solar Report ({MISO_DISPLAY_URL})")
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
