@@ -165,3 +165,31 @@ def test_the_request_carries_the_system_prompt_and_a_token_ceiling(answering):
     assert call["system"]
     assert call["max_tokens"] >= 1000
     assert call["model"]
+
+
+# --- the "as of" the retriever worked out ---------------------------------
+
+def test_the_retrievers_as_of_is_carried_out_to_the_caller(answering):
+    """The seam nobody owned. The route's half is covered by test_routes, but
+    it monkeypatches answer_question - so returning None here left the route
+    falling back to the wall clock and stamping yesterday's settled numbers
+    with the current time, which is the bug this was all meant to fix.
+
+    The 13 call sites above were widened from two-tuple to three-tuple with
+    `_` in the new slot when the signature changed. That is a compile fix, not
+    a test: every one of them passes with this value replaced by None.
+    """
+    answering(Response([Block("ok")]))
+    assert claude.answer_question("q")[2] == "09:25 EST"
+
+
+def test_mock_mode_carries_the_as_of_too(monkeypatch, retrieval):
+    """Mock mode is the demo's fallback when Claude is unreachable, so it is
+    exactly when a stale stamp would go unnoticed."""
+    monkeypatch.setattr(claude, "client", None)
+    assert claude.answer_question("q")[2] == "09:25 EST"
+
+
+def test_a_refusal_still_reports_when_the_data_was_current(answering):
+    answering(Response([Block("no")], stop_reason="refusal"))
+    assert claude.answer_question("q")[2] == "09:25 EST"

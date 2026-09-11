@@ -448,3 +448,24 @@ def test_an_unpaged_only_cycle_keeps_its_order():
     core._paged_rotation = 0
     order = core.cycle_order(list(core.ENDPOINTS))
     assert [e.key for e in order] == [e.key for e in core.ENDPOINTS]
+
+
+def test_a_data_exchange_payload_survives_a_cycle_without_a_key(tmp_path):
+    """A key that is unset - or expires mid-demo - makes eleven endpoints
+    inactive without removing them from the table. Pruning their payloads
+    would strand the documents already in Chroma: present, unrefreshable, with
+    no source on disk. Every other prune test passes a key that genuinely left
+    the code, so none of them exercised this."""
+    (tmp_path / "DEFuelMix.json").write_bytes(b"{}")
+    (tmp_path / "DEActualLoad.json").write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {"DEFuelMix": {}, "DEActualLoad": {}},
+                         {"FuelMix": {}})
+    assert (tmp_path / "DEFuelMix.json").exists()
+    assert (tmp_path / "DEActualLoad.json").exists()
+
+
+def test_an_endpoint_that_really_left_the_code_is_still_pruned(tmp_path):
+    """The other half: the guard above must not turn pruning off entirely."""
+    (tmp_path / "RetiredFeed.json").write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {"RetiredFeed": {}}, {"FuelMix": {}})
+    assert not (tmp_path / "RetiredFeed.json").exists()
