@@ -1,126 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1000" viewBox="0 0 1240 1000" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#087CC1"/>
-    </marker>
-    <marker id="arrowm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#868E96"/>
-    </marker>
-  </defs>
-
-  <rect x="0" y="0" width="1240" height="1000" fill="#FFFFFF"/>
-  <text x="620" y="36" font-size="18" font-weight="700" fill="#092A47" text-anchor="middle">MISO Ramen in production &#8212; reference deployment (infra/)</text>
-
-  <!-- row 0: user -->
-  <rect x="560" y="60" width="120" height="48" rx="24" fill="#092A47"/>
-  <text x="620" y="89" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="middle">User</text>
-
-  <!-- row 1: frontend + WAF edge -->
-  <rect x="250" y="150" width="280" height="88" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="390" y="176" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">Static Web App</text>
-  <text x="266" y="199" font-size="11.5" fill="#526575">&#8226;  serves the React build</text>
-  <text x="266" y="217" font-size="11.5" fill="#526575">&#8226;  free tier, global CDN</text>
-
-  <rect x="710" y="150" width="280" height="88" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="850" y="176" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">App Gateway + WAF</text>
-  <text x="726" y="199" font-size="11.5" fill="#526575">&#8226;  load balancer + firewall (OWASP)</text>
-  <text x="726" y="217" font-size="11.5" fill="#526575">&#8226;  blocks &gt;60 req/min per IP at the edge</text>
-
-  <line x1="590" y1="108" x2="420" y2="146" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="470" y="122" font-size="11" fill="#526575">loads the UI</text>
-  <line x1="650" y1="108" x2="820" y2="146" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="770" y="122" font-size="11" fill="#526575">/ask</text>
-
-  <!-- row 2: AKS cluster -->
-  <rect x="140" y="290" width="960" height="220" rx="14" fill="#F6F9FB" stroke="#087CC1" stroke-width="1.5" stroke-dasharray="8 5"/>
-  <text x="160" y="320" font-size="12" font-weight="600" letter-spacing="1.5" fill="#087CC1">AKS CLUSTER &#8212; 2&#8211;5 NODES, AUTOSCALING</text>
-
-  <line x1="870" y1="238" x2="960" y2="341" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-  <rect x="170" y="345" width="210" height="135" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="275" y="371" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">poller</text>
-  <text x="186" y="396" font-size="11.5" fill="#526575">&#8226;  exactly 1 replica</text>
-  <text x="186" y="414" font-size="11.5" fill="#526575">&#8226;  rate guard: the ONLY</text>
-  <text x="186" y="432" font-size="11.5" fill="#526575">    thing that calls MISO</text>
-  <text x="186" y="450" font-size="11.5" fill="#526575">&#8226;  writes snapshots</text>
-
-  <rect x="410" y="345" width="210" height="135" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="515" y="371" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">chroma</text>
-  <text x="426" y="396" font-size="11.5" fill="#526575">&#8226;  client/server mode</text>
-  <text x="426" y="414" font-size="11.5" fill="#526575">&#8226;  1 replica, persistent volume</text>
-  <text x="426" y="432" font-size="11.5" fill="#526575">&#8226;  api + mcp query it</text>
-  <text x="426" y="450" font-size="11.5" fill="#526575">    over HTTP</text>
-
-  <rect x="650" y="345" width="210" height="135" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="755" y="371" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">mcp</text>
-  <text x="666" y="396" font-size="11.5" fill="#526575">&#8226;  MCP server</text>
-  <text x="666" y="414" font-size="11.5" fill="#526575">&#8226;  other AI assistants</text>
-  <text x="666" y="432" font-size="11.5" fill="#526575">    automate here</text>
-  <text x="666" y="450" font-size="11.5" fill="#526575">&#8226;  reads chroma only</text>
-
-  <rect x="890" y="345" width="190" height="135" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="985" y="371" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">api</text>
-  <text x="906" y="396" font-size="11.5" fill="#526575">&#8226;  FastAPI /ask</text>
-  <text x="906" y="414" font-size="11.5" fill="#526575">&#8226;  N replicas, HPA</text>
-  <text x="906" y="432" font-size="11.5" fill="#526575">&#8226;  scales freely: the poller</text>
-  <text x="906" y="450" font-size="11.5" fill="#526575">    no longer lives inside it</text>
-
-  <!-- row 3: shared services -->
-  <rect x="140" y="580" width="290" height="106" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="285" y="606" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">Redis</text>
-  <text x="156" y="631" font-size="11.5" fill="#526575">&#8226;  answer cache (fresh until next poll)</text>
-  <text x="156" y="649" font-size="11.5" fill="#526575">&#8226;  shared per-IP rate-limit counters</text>
-  <text x="156" y="667" font-size="11.5" fill="#526575">&#8226;  works across N api replicas</text>
-
-  <rect x="475" y="580" width="290" height="106" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="620" y="606" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">Azure Files</text>
-  <text x="491" y="631" font-size="11.5" fill="#526575">&#8226;  raw MISO snapshots + status</text>
-  <text x="491" y="649" font-size="11.5" fill="#526575">&#8226;  request log (ip, question, outcome)</text>
-  <text x="491" y="667" font-size="11.5" fill="#526575">&#8226;  Chroma's persistent volume</text>
-
-  <rect x="810" y="580" width="290" height="106" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="955" y="606" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">Key Vault + ACR</text>
-  <text x="826" y="631" font-size="11.5" fill="#526575">&#8226;  claude-api-key, read via</text>
-  <text x="826" y="649" font-size="11.5" fill="#526575">    workload identity</text>
-  <text x="826" y="667" font-size="11.5" fill="#526575">&#8226;  ACR holds the container images</text>
-
-  <line x1="285" y1="510" x2="285" y2="576" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="620" y1="510" x2="620" y2="576" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="955" y1="510" x2="955" y2="576" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-  <!-- row 4: observability -->
-  <rect x="310" y="750" width="290" height="88" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="455" y="776" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">Log Analytics</text>
-  <text x="326" y="799" font-size="11.5" fill="#526575">&#8226;  app, poller + WAF logs</text>
-  <text x="326" y="817" font-size="11.5" fill="#526575">&#8226;  30-day retention</text>
-
-  <rect x="680" y="750" width="290" height="88" rx="10" fill="#FFFFFF" stroke="#087CC1" stroke-width="1.5"/>
-  <text x="825" y="776" font-size="14" font-weight="600" fill="#122B40" text-anchor="middle">SIEM</text>
-  <text x="696" y="799" font-size="11.5" fill="#526575">&#8226;  workspace onboarded &#8212; every</text>
-  <text x="696" y="817" font-size="11.5" fill="#526575">    request + WAF event, forwarded</text>
-
-  <line x1="455" y1="690" x2="455" y2="746" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="470" y="722" font-size="11" fill="#526575">logs</text>
-  <line x1="600" y1="794" x2="676" y2="794" stroke="#087CC1" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="638" y="784" font-size="11" fill="#526575">forwarded</text>
-
-  <!-- external services, bottom-left / bottom-right of cluster -->
-  <rect x="40" y="150" width="150" height="88" rx="10" fill="#FFFFFF" stroke="#868E96" stroke-width="1.5"/>
-  <text x="115" y="180" font-size="13" font-weight="600" fill="#495057" text-anchor="middle">MISO APIs</text>
-  <text x="115" y="202" font-size="11" fill="#868E96" text-anchor="middle">public, free JSON</text>
-  <text x="115" y="218" font-size="11" fill="#868E96" text-anchor="middle">(outside Azure)</text>
-
-  <line x1="240" y1="345" x2="130" y2="242" stroke="#868E96" stroke-width="1.5" marker-end="url(#arrowm)"/>
-  <text x="60" y="270" font-size="11" fill="#868E96">max 1 req/link/min</text>
-
-  <rect x="1050" y="150" width="150" height="88" rx="10" fill="#FFFFFF" stroke="#868E96" stroke-width="1.5"/>
-  <text x="1125" y="180" font-size="13" font-weight="600" fill="#495057" text-anchor="middle">Anthropic API</text>
-  <text x="1125" y="202" font-size="11" fill="#868E96" text-anchor="middle">Claude writes</text>
-  <text x="1125" y="218" font-size="11" fill="#868E96" text-anchor="middle">the answers</text>
-
-  <line x1="1030" y1="345" x2="1115" y2="242" stroke="#868E96" stroke-width="1.5" marker-end="url(#arrowm)"/>
-  <text x="1090" y="270" font-size="11" fill="#868E96">one call/question</text>
-
-  <text x="620" y="920" font-size="13" fill="#526575" text-anchor="middle">Reference architecture only &#8212; nothing here has been deployed. `terraform validate` passes (azurerm ~&gt; 5.4).</text>
-  <text x="620" y="944" font-size="12" fill="#868E96" text-anchor="middle">Same rules as the laptop version: one poller, staleness disclosed, MISO never sees more than one request per link per minute.</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1420" height="930" viewBox="0 0 1420 930" font-family="Inter, 'Helvetica Neue', Arial, sans-serif">
+<defs>
+  <filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#092A47" flood-opacity="0.16"/>
+  </filter>
+  <linearGradient id="navyg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0d3f66"/><stop offset="1" stop-color="#092a47"/>
+  </linearGradient>
+  <radialGradient id="blob" cx="0.35" cy="0.35" r="0.75">
+    <stop offset="0" stop-color="#1496d4"/><stop offset="0.7" stop-color="#087cc1"/><stop offset="1" stop-color="#0a5c92"/>
+  </radialGradient>
+  <marker id="ab" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#087CC1"/></marker>
+  <marker id="ag" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#65B82E"/></marker>
+  <marker id="an" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#092A47"/></marker>
+  <marker id="aa" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#B36F0E"/></marker>
+</defs>
+<rect width="1420" height="930" fill="#EAF3FA"/>
+<rect x="60" y="116" width="322" height="72" rx="12" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/><text x="76" y="137" font-size="13" font-weight="800" fill="#092A47">Two journeys</text><line x1="76" y1="154" x2="91" y2="154" stroke="#087CC1" stroke-width="2.4"/><path d="M91,150 L99,154 L91,158 Z" fill="#087CC1"/><text x="108" y="158" font-size="12" fill="#122B40">Answering your question</text><line x1="76" y1="178" x2="91" y2="178" stroke="#65B82E" stroke-width="2.4"/><path d="M91,174 L99,178 L91,182 Z" fill="#65B82E"/><text x="108" y="182" font-size="12" fill="#122B40">Refreshing MISO data every 5 min</text><g filter="url(#sh)"><rect x="590" y="92" width="250" height="96" rx="16" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/></g><text x="715.0" y="120" text-anchor="middle" font-size="17" font-weight="800" fill="#092A47">You ask a question</text><text x="715.0" y="142" text-anchor="middle" font-size="12.5" fill="#526575">“How much wind right now?”</text><path d="M550,128 h32 a5,5 0 0 1 5,5 v12 a5,5 0 0 1 -5,5 h-20 l-9,8 v-8 h-3 a5,5 0 0 1 -5,-5 v-12 a5,5 0 0 1 5,-5 Z" fill="none" stroke="#1496D4" stroke-width="2.4" stroke-linejoin="round"/><circle cx="558" cy="140" r="2" fill="#1496D4"/><circle cx="566" cy="140" r="2" fill="#1496D4"/><circle cx="574" cy="140" r="2" fill="#1496D4"/><g filter="url(#sh)"><rect x="686.0" y="229.0" width="58" height="58" rx="14" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/></g><path d="M715,240 l16,6 v10 c0,10 -8,16 -16,20 c-8,-4 -16,-10 -16,-20 v-10 Z" fill="none" stroke="#B36F0E" stroke-width="2.5" stroke-linejoin="round"/><path d="M701,252 h28 M701,261 h28" stroke="#B36F0E" stroke-width="2"/><text x="752" y="263" font-size="14" font-weight="700" fill="#092A47">Firewall</text><g filter="url(#sh)"><rect x="686.0" y="343.0" width="58" height="58" rx="14" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/></g><path d="M706,358 v22 M706,358 l-6,7 M706,358 l6,7" stroke="#1496D4" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M724,386 v-22 M724,386 l-6,-7 M724,386 l6,-7" stroke="#1496D4" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><text x="752" y="377" font-size="14" font-weight="700" fill="#092A47">Load balancer</text><rect x="80" y="470" width="1222" height="410" rx="22" fill="#F6F9FB" stroke="#1496D4" stroke-width="2"/><text x="104" y="858" font-size="18" font-weight="800" fill="#087CC1">Cluster  ·  2–5 nodes  ·  everything inside is a pod</text><g filter="url(#sh)"><rect x="560" y="505" width="270" height="96" rx="16" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/></g><text x="695.0" y="533" text-anchor="middle" font-size="17" font-weight="800" fill="#092A47">API</text><text x="695.0" y="555" text-anchor="middle" font-size="12.5" fill="#526575">orchestrates the answer</text><g filter="url(#sh)"><circle cx="628" cy="720" r="66" fill="#ffffff" stroke="#092A47" stroke-width="2.5"/></g><text x="628" y="714" text-anchor="middle" font-size="16" font-weight="800" fill="#092A47">MiniLM</text><text x="628" y="734" text-anchor="middle" font-size="11.5" fill="#526575">embeds text → vector</text><g filter="url(#sh)"><path d="M785.0,711.0 a95.0,16 0 0 1 190,0 v118 a95.0,16 0 0 1 -190,0 Z" fill="#ffffff" stroke="#087CC1" stroke-width="2"/><path d="M785.0,711.0 a95.0,16 0 0 0 190,0" fill="none" stroke="#087CC1" stroke-width="2"/></g><text x="880" y="749.0" text-anchor="middle" font-size="16" font-weight="800" fill="#092A47">Chroma</text><text x="880" y="768.0" text-anchor="middle" font-size="11.5" fill="#526575">holds data as vectors</text><text x="880" y="785.0" text-anchor="middle" font-size="11.5" fill="#526575">finds closest matches</text><g filter="url(#sh)"><circle cx="1120" cy="690" r="72" fill="#ffffff" stroke="#092A47" stroke-width="2.5"/></g><text x="1120" y="684" text-anchor="middle" font-size="16" font-weight="800" fill="#092A47">Poller</text><text x="1120" y="704" text-anchor="middle" font-size="11.5" fill="#526575">every 5 min</text><text x="1120" y="721" text-anchor="middle" font-size="11.5" fill="#526575">parses MISO data</text><g filter="url(#sh)"><rect x="170.0" y="520.0" width="80" height="80" rx="14" fill="#ffffff" stroke="#DCE5EB" stroke-width="1.5"/></g><circle cx="210" cy="560" r="15" fill="none" stroke="#092A47" stroke-width="2.4"/><path d="M210,551 v18 M201,560 h18 M204,554 l12,12 M216,554 l-12,12" stroke="#092A47" stroke-width="2" stroke-linecap="round"/><text x="210" y="620.0" text-anchor="middle" font-size="14" font-weight="700" fill="#092A47">Model</text><text x="210" y="646" text-anchor="middle" font-size="11.5" fill="#526575">the LLM — open-source or tokens</text><text x="1250" y="228" text-anchor="middle" font-size="13" font-weight="700" fill="#526575">MISO Public APIs</text><g filter="url(#sh)"><polygon points="1250.0,242.0 1300.2,271.0 1300.2,329.0 1250.0,358.0 1199.8,329.0 1199.8,271.0" fill="url(#blob)" stroke="#0a5c92" stroke-width="1.5"/></g><text x="1250" y="307" text-anchor="middle" font-size="20" font-weight="800" fill="#ffffff">API</text><path d="M715,188 L715,229" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="728.2" y="195" width="39.6" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="748" y="209" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">asks</text><path d="M715,287 L715,343" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><path d="M715,401 L715,505" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="711.0" y="436" width="110.0" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="766" y="450" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">routes to a pod</text><path d="M648,601 L638,656" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="552.2" y="615" width="71.6" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="588" y="629" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">1 · embed</text><path d="M692,726 L786,758" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="709.0" y="707" width="78.0" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="748" y="721" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">2 · search</text><path d="M868,698 L772,603" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="736.6" y="607" width="122.80000000000001" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="798" y="621" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">3 · matching text</text><path d="M560,540 L254,540" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="300.8" y="511" width="212.4" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="407" y="525" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">4 · prompt + question + context</text><path d="M254,592 L558,592" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="345.6" y="563" width="122.80000000000001" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="407" y="577" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">writes the answer</text><path d="M560,516 Q419.0,350.0 578,184" fill="none" stroke="#087CC1" stroke-width="2.6" marker-end="url(#ab)"/><rect x="381.0" y="317" width="142.0" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="452" y="331" text-anchor="middle" font-size="12" font-weight="600" fill="#087CC1">answer + source link</text><path d="M1146,623 L1235,372" fill="none" stroke="#65B82E" stroke-width="2.6" marker-end="url(#ag)"/><rect x="1142.8" y="455" width="116.4" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="1201" y="469" text-anchor="middle" font-size="12" font-weight="600" fill="#65B82E">every 5 min: ask</text><path d="M1268,372 L1158,632" fill="none" stroke="#65B82E" stroke-width="2.6" marker-end="url(#ag)"/><rect x="1152.2" y="547" width="71.6" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="1188" y="561" text-anchor="middle" font-size="12" font-weight="600" fill="#65B82E">JSON back</text><path d="M1058,650 L678,678" fill="none" stroke="#65B82E" stroke-width="2.6" marker-end="url(#ag)"/><rect x="867.2" y="635" width="135.60000000000002" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="935" y="649" text-anchor="middle" font-size="12" font-weight="600" fill="#65B82E">parsed text → embed</text><path d="M632,784 L790,800" fill="none" stroke="#65B82E" stroke-width="2.6" marker-end="url(#ag)"/><rect x="622.6" y="803" width="154.8" height="20" rx="5" fill="#ffffff" stroke="#DCE5EB" stroke-width="1"/><text x="700" y="817" text-anchor="middle" font-size="12" font-weight="600" fill="#65B82E">embed → store (UPSERT)</text></svg>
