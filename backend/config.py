@@ -5,7 +5,7 @@ from pathlib import Path
 
 MODEL = "claude-opus-5"
 
-CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
+CONTACT_URL = "https://www.misoenergy.org/meet-miso/contact-us/"
 # old "real-time-displays" page 404s now; MISO moved it here (checked 2026-09-05)
 REALTIME_URL = (
     "https://www.misoenergy.org/markets-and-operations/"

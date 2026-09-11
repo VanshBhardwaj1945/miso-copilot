@@ -1,5 +1,6 @@
 """Each endpoint's raw JSON -> one plain-English snapshot paragraph (+ as-of, source URL)."""
 
+from datetime import datetime
 from typing import Any
 
 # old "real-time-displays" page 404s now; MISO moved it here (checked 2026-09-05)
@@ -77,13 +78,38 @@ def transform_load(data: dict) -> tuple[str, str, str]:
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
 
 
+SNAPSHOT_STAMP = "%m/%d/%Y %I:%M:%S %p EST"
+
+
+def _newest_stamp(rows: list) -> str:
+    """The newest timestamp on the snapshot rows, as MISO wrote it.
+
+    Not row zero. Row zero is "Forecasted Peak Demand", stamped midnight, so
+    an answer about 8pm demand was labeled "12:00:00 AM" - harmless while this
+    value was discarded, wrong on screen now that it reaches the response.
+    """
+    newest, stamp = None, ""
+    for row in rows or []:
+        raw = (row.get("d") or "").strip()
+        try:
+            when = datetime.strptime(raw, SNAPSHOT_STAMP)
+        except ValueError:
+            continue
+        if newest is None or when > newest:
+            newest, stamp = when, raw
+    if stamp:
+        return stamp
+    # nothing parsed: MISO changed the format, so say the least we can defend
+    return (rows[0].get("d") or "Recent Interval") if rows else "Recent Interval"
+
+
 def transform_snapshot(data: list) -> tuple[str, str, str]:
     """
     Parses Snapshot.json:
     [{"t": "Current Demand (MW)", "v": "1,000", "d": "1/01/1970 12:00:00 AM EST"}, ...]
     Returns: (prose, as_of_timestamp, source_url)
     """
-    as_of = data[0].get("d", "Recent Interval") if data else "Recent Interval"
+    as_of = _newest_stamp(data)
     lines = [f"MISO System Real-Time Snapshot Overview (as of {as_of}):"]
 
     for row in data:
@@ -206,12 +232,13 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
     # These endpoints publish a completed market day at 2am EST the day after,
     # so this is never "right now" however the /real-time/ path reads. Saying so
     # is the same duty as the as-of stamp: staleness stays visible.
+    dated = f" {as_of[:10]}" if "T" in as_of else ""
     lines = [f"MISO generation by fuel type and region for the completed market "
-             f"day, from the MISO Data Exchange API (interval starting "
-             f"{as_of} EST). This is a settled market day, not live output - "
-             f"for current generation use the real-time fuel mix." if as_of else
-             "MISO generation by fuel type and region for a completed market "
-             "day, from the MISO Data Exchange API."]
+             f"day{dated}, from the MISO Data Exchange API. This is a settled "
+             f"market day, not live output - for current generation use the "
+             f"real-time fuel mix. The fuel breakdown below is each region's "
+             f"final interval; the day's total range follows it."]
+    by_region = _rows_by_region(rows or [])
 
     # MISO first when present - it is the footprint total the others sum toward.
     # Anything MISO adds to the enum later is appended rather than dropped: a
@@ -231,10 +258,18 @@ def transform_de_fueltype(data: dict) -> tuple[str, str, str]:
             share = f" ({mw / total * 100:.1f}%)" if total > 0 else ""
             parts.append(f"{label} {mw:,.0f} MW{share}")
         name = _REGION_NAMES.get(code, code)
+        clock = _clock(_row_time(row))
+        ending = f" ending {clock} EST" if clock else ""
         if parts:
-            lines.append(f"- {name}: {total:,.0f} MW total - " + ", ".join(parts) + ".")
+            line = f"- {name}: {total:,.0f} MW total{ending} - " + ", ".join(parts) + "."
         else:
-            lines.append(f"- {name}: {total:,.0f} MW total.")
+            line = f"- {name}: {total:,.0f} MW total{ending}."
+        # the same reason every other settled feed carries a range: reporting
+        # only the last interval understated MISO Central's generation by 30%
+        day = _day_sentence(_day_range(by_region.get(code, [])))
+        if day:
+            line += f" Across the day, {day}."
+        lines.append(line)
 
     # Only warn about the footprint total when one is actually present: MISO
     # returns the three regions and no MISO-wide row, so the warning would
@@ -433,6 +468,22 @@ FRAMING = {
 }
 
 
+def _interval_total_phrase(rows_here: list) -> str:
+    """", 17,790 MW in total" when several rows share the region's interval."""
+    if len(rows_here) < 2:
+        return ""
+    summed: dict = {}
+    for row in rows_here:
+        for key, amount in _row_measures(row).items():
+            summed[key] = summed.get(key, 0.0) + amount
+    parts = []
+    for key, amount in summed.items():
+        label, unit = _MEASURES[key]
+        unit = f" {unit}" if unit else ""
+        parts.append(f"{amount:,.0f}{unit} {label} in total")
+    return ", " + ", ".join(parts) if parts else ""
+
+
 def make_de_transformer(title: str, doc_url: str, kind: str = "settled"):
     """A transformer for one region-scoped Data Exchange endpoint.
 
@@ -459,7 +510,13 @@ def make_de_transformer(title: str, doc_url: str, kind: str = "settled"):
         as_of = max((when for when, _ in latest.values()), default="")
 
         day, nature = FRAMING.get(kind, FRAMING["settled"])
-        lines = [f"MISO {title} by region for {day}, from the MISO Data Exchange "
+        # Name the date. The old header carried one and this replaced it with
+        # per-region clock times, which left "ending 23:00 EST" with no day
+        # attached - and the retriever hands Claude the text only, never the
+        # as_of metadata, so nothing downstream could supply it. On demo day a
+        # reader would take a two-day-old market day for yesterday.
+        dated = f"{day} {as_of[:10]}" if "T" in as_of else day
+        lines = [f"MISO {title} by region for {dated}, from the MISO Data Exchange "
                  f"API. {nature} Each region reports the day's high and low and "
                  f"its own final interval; regions can end at different intervals."]
         known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
@@ -470,7 +527,13 @@ def make_de_transformer(title: str, doc_url: str, kind: str = "settled"):
             final = _describe_rows(rows_here)
             clock = _clock(when)
             ending = f" ending {clock} EST" if clock else ""
-            line = f"- {name}: {final}{ending}." if final else f"- {name}: no values reported."
+            # A dimensional feed splits the interval over several rows, and the
+            # day range below sums them - so without this the same label named
+            # a zone's value and a region's total in one sentence, and the
+            # region's own final number appeared nowhere.
+            interval_total = _interval_total_phrase(rows_here)
+            line = (f"- {name}: {final}{ending}{interval_total}." if final
+                    else f"- {name}: no values reported.")
             day = _day_sentence(_day_range(by_region.get(code, [])))
             if day:
                 line += f" Across the day, {day}."

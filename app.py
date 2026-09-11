@@ -17,7 +17,7 @@ import streamlit as st
 CHART_BLOCK = re.compile(r"```(chart|map)\s*\n(.*?)```", re.DOTALL)
 
 BACKEND_URL = os.getenv("MISO_RAMEN_BACKEND", "http://localhost:8000")
-CONTACT_URL = "https://www.misoenergy.org/about/contact-us/"
+CONTACT_URL = "https://www.misoenergy.org/meet-miso/contact-us/"
 
 SAMPLE_QUESTIONS = [
     "How much wind power is MISO generating right now?",

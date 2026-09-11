@@ -52,3 +52,6 @@ backend/rag/crosswalk.draft.json
 .coverage
 htmlcov/
 .pytest_cache/
+
+# request logs are runtime artifacts, not source
+data/logs/

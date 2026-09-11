@@ -8,6 +8,12 @@ from typing import Any, Callable
 
 from llama_index.core.schema import Document
 
+# imported for its side effect: backend.config loads .env into os.environ.
+# Without it a caller that has not already imported config reads no key and
+# silently drops all eleven Data Exchange feeds. core.py carries the same
+# import for the same reason.
+import backend.config  # noqa: F401
+
 from backend.rag.store import get_chroma_collection, get_index
 from backend.rag.transformers import (
     make_de_transformer,

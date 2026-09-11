@@ -1,0 +1,11 @@
+[run]
+branch = True
+omit =
+    # Hand-run developer tooling, invoked as `python -m backend.rag.<name>`
+    # and never imported by anything that serves a question: one drafts the
+    # report-to-API crosswalk with Claude, the other downloads the reference
+    # corpus. They are omitted by name so their absence is deliberate - the
+    # package used to hide them from coverage entirely, which is how 468
+    # untested lines went unnoticed.
+    backend/rag/build_crosswalk.py
+    backend/rag/fetch_docs.py

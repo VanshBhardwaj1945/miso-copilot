@@ -427,3 +427,24 @@ def test_page_parameters_are_appended():
 def test_page_parameters_join_an_existing_query_string():
     url = core._page_url("https://x/f?region=NORTH", 1)
     assert url.count("?") == 1 and "&pageNumber=1" in url
+
+
+def test_the_paged_endpoints_rotate_so_the_budget_does_not_starve_the_same_ones():
+    """The budget is spent in list order, so a fixed order starves the tail
+    every cycle rather than the "retries next cycle" the budget promises -
+    the first two would win forever and the other nine never refresh."""
+    core._paged_rotation = 0
+    endpoints = core.ENDPOINTS + core.DATA_EXCHANGE_ENDPOINTS
+    firsts = []
+    for _ in range(len(core.DATA_EXCHANGE_ENDPOINTS)):
+        order = core.cycle_order(endpoints)
+        assert [e.key for e in order[:4]] == [e.key for e in core.ENDPOINTS]
+        firsts.append(order[4].key)
+    # every paged endpoint gets first crack within one full rotation
+    assert set(firsts) == {e.key for e in core.DATA_EXCHANGE_ENDPOINTS}
+
+
+def test_an_unpaged_only_cycle_keeps_its_order():
+    core._paged_rotation = 0
+    order = core.cycle_order(list(core.ENDPOINTS))
+    assert [e.key for e in order] == [e.key for e in core.ENDPOINTS]

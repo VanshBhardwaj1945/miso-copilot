@@ -443,3 +443,46 @@ def test_an_hour_number_is_not_mistaken_for_a_timestamp():
     assert _row_time({"timeInterval": {"value": "24"}}) == ""
     assert _row_time({"timeInterval": {"value": "2026-09-09T23:00:00"}}) == \
         "2026-09-09T23:00:00"
+
+
+def test_a_settled_document_names_the_market_date():
+    """The retriever hands Claude the text only - never the as_of metadata -
+    so a document that says "ending 23:00 EST" with no day attached lets a
+    two-day-old market day read as yesterday."""
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
+    assert "completed market day 2026-09-09" in prose.splitlines()[0]
+
+
+def test_the_fuel_mix_reports_the_day_as_well_as_its_last_interval():
+    """The flagship feed kept its own transformer and was skipped by the first
+    pass, so "generation yesterday" understated MISO Central by 30%."""
+    from backend.rag.transformers import transform_de_fueltype
+    prose, _, _ = transform_de_fueltype({"data": [
+        {"timeInterval": {"start": "2026-09-09T16:00:00"}, "region": "CENTRAL",
+         "fuelTypes": {"coal": 30000.0}, "totalMw": 50951.0},
+        {"timeInterval": {"start": "2026-09-09T23:00:00"}, "region": "CENTRAL",
+         "fuelTypes": {"coal": 14357.0}, "totalMw": 35697.0},
+    ]})
+    assert "35,697 MW total ending 23:00 EST" in prose
+    assert "peaked at 50,951 MW (16:00 EST)" in prose
+    assert "completed market day 2026-09-09" in prose
+
+
+def test_a_dimensional_feed_states_the_regions_own_interval_total():
+    """Without it the same label named a zone's value and a region's day total
+    in one sentence, and the region's final number appeared nowhere: "North
+    load forecast at 23:00" would be answered with one zone's 11,045."""
+    fn = make_de_transformer("medium-term load forecast", URL, "forecast")
+    prose, _, _ = fn({"data": [
+        de_row("NORTH", when="2026-09-09T23:00:00", localResourceZone="Z1", loadForecast=11045.0),
+        de_row("NORTH", when="2026-09-09T23:00:00", localResourceZone="Z3", loadForecast=6745.0),
+        de_row("NORTH", when="2026-09-09T17:00:00", localResourceZone="Z1", loadForecast=21859.0),
+    ]})
+    assert "17,790 MW load forecast in total" in prose
+
+
+def test_a_single_row_region_does_not_restate_itself_as_a_total():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
+    assert "in total" not in prose

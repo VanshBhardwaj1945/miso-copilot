@@ -885,6 +885,31 @@ def _write_status(directory: Path, observations: dict, base: str,
     return status
 
 
+_paged_rotation = 0
+
+
+def cycle_order(endpoints: list) -> list:
+    """This cycle's polling order: the unpaged feeds first, then a rotation.
+
+    The page-pause budget is spent in list order, so a fixed order does not
+    give the "fails and retries next cycle" the budget promises - it starves
+    the same endpoints every cycle, forever, while the first two always win.
+    Rotating the paged feeds makes the shortfall move, so every endpoint
+    refreshes within a few cycles instead of never.
+
+    The four display feeds stay in front and never page, so the live numbers
+    are fetched before any pause is spent.
+    """
+    global _paged_rotation
+    plain = [e for e in endpoints if not e.paged]
+    paged = [e for e in endpoints if e.paged]
+    if paged:
+        offset = _paged_rotation % len(paged)
+        paged = paged[offset:] + paged[:offset]
+        _paged_rotation += 1
+    return plain + paged
+
+
 def poll_once() -> dict:
     """Fetch every active endpoint, validate, write files, update the status file.
 
@@ -911,7 +936,7 @@ def poll_once() -> dict:
     # one budget for the whole cycle: the paging pauses are sequential, so the
     # live feeds care about the total wait, not any one endpoint's share
     budget = PagePauseBudget()
-    for endpoint in active_endpoints():
+    for endpoint in cycle_order(active_endpoints()):
         key = endpoint.key
         try:
             observations[key] = _poll_endpoint(
