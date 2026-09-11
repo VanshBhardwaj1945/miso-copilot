@@ -36,6 +36,14 @@ _client = None
 _client_lock = threading.Lock()
 
 
+def reset_client() -> None:
+    """Drop the cached client. For tests, which repoint CHROMA_DIR per test -
+    a client built against the previous directory would quietly serve it."""
+    global _client
+    with _client_lock:
+        _client = None
+
+
 def get_chroma_collection():
     global _client
     with _client_lock:

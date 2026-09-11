@@ -16,6 +16,11 @@ from backend.rag import ingest_api, store
 def isolated_chroma(tmp_path, monkeypatch):
     """A Chroma per test. Without this a test run would rewrite the live store."""
     monkeypatch.setattr(store, "CHROMA_DIR", tmp_path / "chroma")
+    # the client is cached for the process, so without this every test after
+    # the first silently reads and writes the first test's directory - which
+    # is how a bug that emptied the store on every second sync passed
+    store.reset_client()
+    monkeypatch.setattr(store, "_client", None, raising=False)
     # BACKUP_RAW_DIR points at the repo's real data/raw.backup, so a test for
     # "this payload is missing" would quietly find a production file instead.
     monkeypatch.setattr(ingest_api, "BACKUP_RAW_DIR", tmp_path / "no-backup")
@@ -213,3 +218,31 @@ def test_re_syncing_a_long_document_still_replaces_rather_than_appends(raw_dir, 
     got = store.get_chroma_collection().get(
         where={"doc_id": "miso_snapshot_deactualload"}, include=["documents"])
     assert len(got["ids"]) == 1
+
+
+def test_syncing_repeatedly_always_leaves_exactly_one_row(raw_dir, keyed):
+    """Three syncs, not two. The row id used to be the doc_id, so the insert
+    overwrote the row the eviction then deleted and the store oscillated
+    between one row and none - the lane was empty every other cycle, and the
+    poller syncs every five minutes. Two syncs cannot see an oscillation; the
+    third is the point of this test."""
+    (raw_dir / "DEActualLoad.json").write_text(json.dumps(de_payload(load=(1.0, 2.0))))
+    counts = []
+    for _ in range(3):
+        ingest_api.sync_raw_snapshots(raw_dir)
+        got = store.get_chroma_collection().get(
+            where={"doc_id": "miso_snapshot_deactualload"})
+        counts.append(len(got["ids"]))
+    assert counts == [1, 1, 1]
+
+
+def test_each_write_lands_under_a_fresh_row_id(raw_dir, keyed):
+    """What makes the UPSERT safe: insert first, delete second, so a failed
+    insert evicts nothing and the old snapshot survives."""
+    (raw_dir / "FuelMix.json").write_text(json.dumps(fuelmix()))
+    ingest_api.sync_raw_snapshots(raw_dir)
+    first = store.get_chroma_collection().get(where={"doc_id": "miso_snapshot_fuelmix"})["ids"]
+    ingest_api.sync_raw_snapshots(raw_dir)
+    second = store.get_chroma_collection().get(where={"doc_id": "miso_snapshot_fuelmix"})["ids"]
+    assert first != second
+    assert len(first) == len(second) == 1

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -184,7 +185,11 @@ def upsert_single_endpoint(filename: str, doc_id: str,
     # prose it was always the last region's numbers. MISO South lost its day
     # range and Claude said so: "no intraday high/low was returned".
     node = TextNode(
-        id_=doc_id,
+        # A fresh id per write, which is what index.insert() used to mint. A
+        # fixed one makes the insert overwrite the very row the eviction below
+        # then deletes, so the store oscillated between holding the snapshot
+        # and holding nothing - every other cycle, the lane was empty.
+        id_=f"{doc_id}-{uuid.uuid4().hex}",
         text=prose,
         metadata={
             "doc_type": _doc_type_for(filename),
