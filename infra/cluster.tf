@@ -1,6 +1,8 @@
-# AKS: 2-5 autoscaling nodes running four workloads (k8s manifests, not
-# Terraform): api (xN, HPA), poller (EXACTLY 1 - the rate-guard rule),
-# mcp (own deployment), chroma (client/server, persistent volume).
+# AKS: 2-5 autoscaling nodes running five workloads (k8s manifests, not
+# Terraform): api (xN, HPA - orchestrates answers), embedder (MiniLM in its
+# own deployment so the api tier carries no ML model; a stateless reader, so
+# it scales like api), poller (EXACTLY 1 - the rate-guard rule), chroma
+# (client/server, persistent volume), mcp (own deployment).
 
 resource "azurerm_kubernetes_cluster" "main" {
   name                = "${var.prefix}-aks"

@@ -13,12 +13,13 @@ run in production — for the presentation and for future work.
 | Local (today) | Production (this file) |
 |---|---|
 | `uvicorn` on a laptop | `api` pods on AKS, N replicas behind a load balancer |
+| MiniLM embedding inside the api process | its own `embedder` service — the api tier carries no ML model, so it stays light and packs densely (scales like api) |
 | the poller inside the API process | its own single-replica workload — splitting it out is what lets the api scale |
 | in-memory answer cache + rate limiter | Redis — shared across all api replicas |
 | embedded Chroma reading local files | Chroma in client/server mode, one replica on a persistent volume |
 | nothing in front of the API | App Gateway with WAF: load balancing, OWASP rules, >60 req/min per IP blocked at the edge |
 | `data/` folder | Azure Files share (snapshots, request log, Chroma volume) |
-| `.env` with the API key | Key Vault secret, read via workload identity |
+| `.env` with the model's API key | Key Vault secret, read via workload identity (the model is provider-agnostic - Claude today, or MISO-hosted) |
 | `/tmp/miso-backend.log` | Log Analytics, **forwarded to SIEM** (workspace onboarded) |
 | — | ACR for container images, built by CI |
 | — | MCP server as its own deployment, so other AI assistants can automate |
@@ -31,7 +32,7 @@ variables.tf       # prefix, region, API key (sensitive)
 main.tf            # resource group
 network.tf         # vnet, subnets, public IP
 edge.tf            # WAF policy (firewall + per-IP rate limit) + App Gateway
-cluster.tf         # AKS + the four workloads it runs
+cluster.tf         # AKS + the five workloads it runs
 registry.tf        # ACR + the cluster's pull permission
 storage.tf         # Redis (cache + rate-limit state) + Azure Files
 secrets.tf         # Key Vault + workload identity
@@ -43,7 +44,7 @@ outputs.tf         # public entrypoint + frontend hostname
 ## Why AKS and not plain VMs
 
 Autoscaling (2–5 nodes), rolling deploys, and one scheduler for four
-distinct workloads (`api`, `poller`, `mcp`, `chroma`) beats hand-managing
+distinct workloads (`api`, `embedder`, `poller`, `chroma`, `mcp`) beats hand-managing
 machines. The k8s manifests for those workloads would live in `k8s/` — this
 file is the platform underneath them.
 
@@ -59,7 +60,7 @@ file is the platform underneath them.
 
 ```bash
 cd infra
-export TF_VAR_claude_api_key=sk-ant-...   # never commit
+export TF_VAR_model_api_key=...   # the answer model's credential; never commit
 terraform init
 terraform plan
 ```
