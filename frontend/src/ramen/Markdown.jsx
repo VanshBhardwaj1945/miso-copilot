@@ -1,3 +1,4 @@
+import { Component } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -8,6 +9,32 @@ import MapBlock from "./MapBlock.jsx";
 
 // Answer renderer: GFM markdown (bold, tables, links), LaTeX math via
 // KaTeX ($...$ / $$...$$), code blocks, ```chart -> ChartBlock, ```map -> MapBlock.
+
+// React unmounts the entire root on an uncaught render error - not the block,
+// not the panel, the whole page including the landing page above it, with the
+// conversation lost because the messages live in useState. The chart and map
+// specs are written by the model and validated nowhere else, so each block
+// gets its own boundary and degrades to the raw JSON: the same fallback a
+// malformed spec already uses, already styled.
+class BlockBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <pre className="miso-md-badchart">
+        <code>{this.props.spec}</code>
+      </pre>
+    );
+  }
+}
 
 export default function Markdown({ children }) {
   return (
@@ -24,10 +51,18 @@ export default function Markdown({ children }) {
         // ```chart blocks become charts; everything else stays a code block.
         code: ({ className, children: kids, ...props }) => {
           if (/language-chart/.test(className || "")) {
-            return <ChartBlock spec={String(kids)} />;
+            return (
+              <BlockBoundary spec={String(kids)}>
+                <ChartBlock spec={String(kids)} />
+              </BlockBoundary>
+            );
           }
           if (/language-map/.test(className || "")) {
-            return <MapBlock spec={String(kids)} />;
+            return (
+              <BlockBoundary spec={String(kids)}>
+                <MapBlock spec={String(kids)} />
+              </BlockBoundary>
+            );
           }
           return (
             <code className={className} {...props}>

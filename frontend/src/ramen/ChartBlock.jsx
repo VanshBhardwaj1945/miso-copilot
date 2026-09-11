@@ -38,6 +38,17 @@ function parseSpec(spec) {
   if (!cfg || typeof cfg !== "object") return null;
   if (!Array.isArray(cfg.labels) || cfg.labels.length === 0) return null;
   if (!Array.isArray(cfg.series) || cfg.series.length === 0) return null;
+  // A null entry survived the length check and reached row[s.name] in
+  // buildRows, which throws - and an uncaught render error unmounts the whole
+  // React root, not just this block. Arrays are objects too, so they are
+  // excluded by name rather than by typeof.
+  cfg.series = cfg.series.filter(
+    (s) => s && typeof s === "object" && !Array.isArray(s)
+  );
+  if (cfg.series.length === 0) return null;
+  // A title that is not a string is rendered as a React child and throws
+  // "Objects are not valid as a React child".
+  if (cfg.title !== undefined && typeof cfg.title !== "string") return null;
   return cfg;
 }
 

@@ -209,3 +209,52 @@ def test_every_transformer_returns_prose_as_of_and_a_source_url(fn, payload):
 def test_no_transformer_raises_on_an_empty_payload(fn, empty):
     """A malformed cycle must degrade to thin prose, never take the poller down."""
     fn(empty)
+
+
+def test_the_snapshot_as_of_is_the_newest_row_not_the_first():
+    """Row zero is "Forecasted Peak Demand", stamped midnight. Taking it
+    labeled an answer about 8pm demand "12:00:00 AM" - which was invisible
+    while the value was discarded and is on screen now that it is not."""
+    from backend.rag.transformers import transform_snapshot
+    rows = [
+        {"t": "Forecasted Peak Demand (MW)", "v": "98,729", "d": "9/10/2026 12:00:00 AM EST"},
+        {"t": "Current Demand (MW)", "v": "96,135", "d": "9/10/2026 8:00:00 PM EST"},
+        {"t": "Scheduled Imports (MW)", "v": "-4,561", "d": "9/10/2026 7:58:00 PM EST"},
+    ]
+    assert transform_snapshot(rows)[1] == "9/10/2026 8:00:00 PM EST"
+
+
+def test_an_unparseable_snapshot_stamp_falls_back_rather_than_crashing():
+    from backend.rag.transformers import transform_snapshot
+    assert transform_snapshot([{"t": "x", "v": "1", "d": "not a date"}])[1] == "not a date"
+    assert transform_snapshot([])[1] == "Recent Interval"
+
+
+def test_the_load_forecast_reports_the_days_peak_not_hour_one():
+    """forecast[0] is Hour Ending 1 - 1 AM - and it read as "the forecast"
+    printed beside an 8 PM actual."""
+    from backend.rag.transformers import transform_load
+    prose, _, _ = transform_load({"LoadInfo": {
+        "RefId": "10-Sep-2026 - Interval 20:25 EST",
+        "FiveMinTotalLoad": [{"Load": {"Time": "20:25", "Value": "95139"}}],
+        "MediumTermLoadForecast": [
+            {"Forecast": {"HourEnding": "1", "LoadForecast": "78103"}},
+            {"Forecast": {"HourEnding": "17", "LoadForecast": "98729"}},
+        ]}})
+    assert "Day-Ahead Forecast Peak: 98,729 MW (Hour Ending 17)" in prose
+    assert "78,103" not in prose
+
+
+def test_the_solar_forecast_is_the_peak_not_midnight():
+    """instances[0] is midnight, so this printed "Day-Ahead Forecasted Solar:
+    0.0 MW" directly under an evening actual of 2,074 MW."""
+    from backend.rag.transformers import transform_windsolar
+    prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
+        {"ActualDateTimeEST": "2026-09-10 12:00:00 AM", "ActualWindValue": "100",
+         "ActualSolarValue": "0", "ForecastWindValue": "200", "ForecastSolarValue": "0"},
+        {"ActualDateTimeEST": "2026-09-10 1:00:00 PM", "ActualWindValue": "300",
+         "ActualSolarValue": "2074", "ForecastWindValue": "400",
+         "ForecastSolarValue": "15687"},
+    ]})
+    assert "Peak Solar: 15,687.0 MW" in prose
+    assert "Forecasted Solar: 0.0 MW" not in prose

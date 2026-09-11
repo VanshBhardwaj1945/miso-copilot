@@ -26,8 +26,11 @@ HERE = Path(__file__).resolve().parent
 SOURCES_PATH = HERE / "doc_sources.json"
 DOCS_DIR = HERE.parent.parent / "data" / "docs"
 
-USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36")
+# The poller identifies itself honestly and so does this. Disguising an
+# automated client as Chrome is the one thing most likely to read as evading
+# the anti-scraping protection AGENTS.md warns about, and the penalty for that
+# is an IP ban we cannot undo.
+USER_AGENT = "miso-ramen/0.1 (MISO Xtern Challenge 2026)"
 PAUSE_SECONDS = 3
 TIMEOUT_SECONDS = 30
 

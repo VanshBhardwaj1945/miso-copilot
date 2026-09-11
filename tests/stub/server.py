@@ -46,14 +46,48 @@ from urllib.parse import parse_qs, urlsplit
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
-# The Data Exchange fuel-type link. Its path carries the market date, which the
-# poller fills in per cycle, so it is held here in the templated form core.py
-# declares and matched with the regex below. One counter for every date: the
-# counters are per link, and a link that answers for a different day each
-# midnight is still one link.
+# Every Data Exchange link the poller polls. Each path carries the market date,
+# which the poller fills in per cycle, so they are held here in the templated
+# form core.py declares and matched with the regexes below. One counter per
+# templated path, for every date: the counters are per link, and a link that
+# answers for a different day each midnight is still one link.
+#
+# Spelled out here rather than imported from core.DATA_EXCHANGE_ENDPOINTS on
+# purpose. A stub that derives its routes from the code under test follows a
+# typo in a path straight into a passing test; a stub that declares them
+# independently answers 404 and the test fails, which is the whole point of
+# reaching them over real HTTP.
+DE_MEASURES = {
+    "DEFuelMix": None,                       # served from the fixture
+    "DEActualLoad": ("load",),
+    "DEFuelOnMargin": ("unitCount",),
+    "DEDayAheadDemand": ("fixed", "priceSens", "virtual"),
+    "DEDayAheadFuelMix": None,               # fuelTypes, like DEFuelMix
+    "DEClearedPhysical": ("supply",),
+    "DEClearedVirtual": ("supply",),
+    "DEOfferedEcoMax": ("mustRun", "economic", "emergency"),
+    "DEOfferedEcoMin": ("mustRun", "economic", "emergency"),
+    "DENetScheduled": ("nsi",),
+    "DELoadForecast": ("loadForecast",),
+}
+DE_LINKS = {
+    "/lgi/v1/real-time/{date}/generation/fuel-type": "DEFuelMix",
+    "/lgi/v1/real-time/{date}/demand/actual": "DEActualLoad",
+    "/lgi/v1/real-time/{date}/generation/fuel-on-the-margin": "DEFuelOnMargin",
+    "/lgi/v1/day-ahead/{date}/demand": "DEDayAheadDemand",
+    "/lgi/v1/day-ahead/{date}/generation/fuel-type": "DEDayAheadFuelMix",
+    "/lgi/v1/day-ahead/{date}/generation/cleared/physical": "DEClearedPhysical",
+    "/lgi/v1/day-ahead/{date}/generation/cleared/virtual": "DEClearedVirtual",
+    "/lgi/v1/day-ahead/{date}/generation/offered/ecomax": "DEOfferedEcoMax",
+    "/lgi/v1/day-ahead/{date}/generation/offered/ecomin": "DEOfferedEcoMin",
+    "/lgi/v1/day-ahead/{date}/interchange/net-scheduled": "DENetScheduled",
+    "/lgi/v1/forecast/{date}/load": "DELoadForecast",
+}
 DE_PATH = "/lgi/v1/real-time/{date}/generation/fuel-type"
-DE_PATH_RE = re.compile(
-    r"^/lgi/v1/real-time/\d{4}-\d{2}-\d{2}/generation/fuel-type$")
+DE_PATH_RES = {
+    re.compile("^" + re.escape(path).replace(r"\{date\}", r"\d{4}-\d{2}-\d{2}") + "$"): path
+    for path in DE_LINKS
+}
 DE_KEY_HEADER = "Ocp-Apim-Subscription-Key"
 
 # The polled links, in the order backend/poller/core.py lists them. Keys are
@@ -64,7 +98,7 @@ PATHS = {
     "/api/RealTimeTotalLoad": "RealTimeTotalLoad",
     "/api/Snapshot": "Snapshot",
     "/api/WindSolar/GetCombined": "WindSolar",
-    DE_PATH: "DEFuelMix",
+    **DE_LINKS,
 }
 
 MODES = (
@@ -90,8 +124,9 @@ def link_for(path: str):
     """
     if path in PATHS:
         return path
-    if DE_PATH_RE.match(path):
-        return DE_PATH
+    for pattern, templated in DE_PATH_RES.items():
+        if pattern.match(path):
+            return templated
     return None
 
 
@@ -135,7 +170,11 @@ def load_fixtures() -> dict:
     parsed rather than kept as bytes because ok mode rewrites the RefId.
     """
     fixtures = {}
-    for key in PATHS.values():
+    # the four legacy links, plus the one Data Exchange shape worth keeping on
+    # disk: fuel-type, whose nested fuelTypes breakdown the generated rows in
+    # de_rows() cannot express. Both fuel-type links are served from it; every
+    # other Data Exchange link carries its own measures in DE_MEASURES.
+    for key in [k for k in PATHS.values() if k not in DE_MEASURES] + ["DEFuelMix"]:
         path = FIXTURE_DIR / f"{key}.json"
         fixtures[key] = json.loads(path.read_text())
     return fixtures
@@ -236,14 +275,52 @@ def _int_param(query: dict, name: str, default: int) -> int:
         return default
 
 
-def de_payload(state: StubState, query: dict) -> bytes:
-    """One page of the Data Exchange fuel-type link, cut from the fixture.
+DE_REGIONS = ("NORTH", "CENTRAL", "SOUTH")
+DE_INTERVALS = ("2026-09-09T22:00:00", "2026-09-09T23:00:00")
 
-    In de-paged mode the fixture's rows are dealt out over `de_pages` pages
-    and `lastPage` arrives only on the last one, which is what drives the
-    poller's multi-page assembly. Otherwise the whole fixture is page one.
+
+def de_rows(key: str) -> list:
+    """Rows for one Data Exchange link, carrying that link's own measures.
+
+    Two intervals per region, not one, because a document that reports only
+    the final interval and a document that reports the day's range are
+    indistinguishable when the day is one interval long - and the range is
+    the part that answers "what was the load yesterday".
     """
-    body = json.loads(json.dumps(state.fixtures["DEFuelMix"]))
+    measures = DE_MEASURES[key]
+    rows = []
+    for step, start in enumerate(DE_INTERVALS):
+        for index, region in enumerate(DE_REGIONS):
+            row = {"timeInterval": {"resolution": "hourly", "start": start,
+                                    "end": start, "value": str(step + 1)},
+                   "region": region}
+            if key == "DEFuelOnMargin":
+                row["peak"] = False
+                row["fuelType"] = "Coal"
+            if key == "DELoadForecast":
+                row["localResourceZone"] = f"Z{index + 1}"
+            for offset, measure in enumerate(measures):
+                # distinct per region, per interval and per measure, so a
+                # transformer that mixes any two of them is visible
+                row[measure] = 1000.0 * (index + 1) + 100.0 * offset + step
+            rows.append(row)
+    return rows
+
+
+def de_payload(state: StubState, key: str, query: dict) -> bytes:
+    """One page of a Data Exchange link.
+
+    The two fuel-type links come from the fixture, which carries the real
+    fuelTypes breakdown; the rest are generated with their own measures.
+
+    In de-paged mode the rows are dealt out over `de_pages` pages and
+    `lastPage` arrives only on the last one, which is what drives the poller's
+    multi-page assembly. Otherwise the whole payload is page one.
+    """
+    if DE_MEASURES[key] is None:
+        body = json.loads(json.dumps(state.fixtures["DEFuelMix"]))
+    else:
+        body = {"data": de_rows(key)}
     rows = body["data"]
     pages = state.de_pages if state.has("de-paged") else 1
     number = _int_param(query, "pageNumber", 1)
@@ -259,7 +336,7 @@ def de_payload(state: StubState, query: dict) -> bytes:
     return json.dumps(body, indent=2).encode()
 
 
-def de_response(state: StubState, subscription_key, query: dict):
+def de_response(state: StubState, key: str, subscription_key, query: dict):
     """The Data Exchange link: the subscription key first, then one page.
 
     An unkeyed request gets MISO's own 401 rather than a payload, because that
@@ -274,7 +351,7 @@ def de_response(state: StubState, subscription_key, query: dict):
                   else "Access denied due to missing subscription key")
         body = json.dumps({"statusCode": 401, "message": reason}).encode()
         return 401, json_headers, body
-    return 200, json_headers, de_payload(state, query)
+    return 200, json_headers, de_payload(state, key, query)
 
 
 def response_for(state: StubState, path: str, revision: int, port: int,
@@ -303,8 +380,8 @@ def response_for(state: StubState, path: str, revision: int, port: int,
         headers = [("Content-Type", "text/plain"), ("Location", location)]
         return 302, headers, b"stub: moved\n"
 
-    if key == "DEFuelMix":
-        return de_response(state, subscription_key, query or {})
+    if key in DE_MEASURES:
+        return de_response(state, key, subscription_key, query or {})
 
     if state.has("empty-load") and key == "RealTimeTotalLoad":
         return 200, json_headers, json.dumps({"LoadInfo": {}}).encode()
@@ -389,7 +466,9 @@ class StubHandler(BaseHTTPRequestHandler):
         # says how hard one link was hit.
         revision = state.count(link)
         subscription_key = self.headers.get(DE_KEY_HEADER)
-        if link == DE_PATH:
+        if link in DE_LINKS:
+            # every Data Exchange link, not just the first: a header attached
+            # to one request and dropped on the other ten would otherwise pass
             state.record_key(subscription_key)
         status, headers, body = response_for(
             state, path, revision, self.server.server_port,

@@ -111,13 +111,142 @@ def test_the_data_exchange_host_is_overridable(monkeypatch):
 def test_date_is_substituted_in_fixed_est(monkeypatch):
     """MISO stamps market days in EST all year. A DST-aware zone asks for the
     wrong day for an hour each night - the same trap the as-of stamp avoids.
+
+    The date is the newest *published* market day, not today; see
+    test_the_date_asked_for_is_never_today.
     """
     de = core.DATA_EXCHANGE_ENDPOINTS[0]
     url = core.endpoint_url(de, "https://x")
     assert "{date}" not in url
+    assert core.market_date() in url
+
+
+# --- market date ---------------------------------------------------------
+
+def test_the_date_asked_for_is_never_today():
+    """MISO answers today with 400 `data not available yet for this market
+    date`: these endpoints publish a completed day at 2am EST the day after,
+    whatever the /real-time/ path suggests. Asking for today failed every
+    cycle until this was found against the live API.
+    """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    assert datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d") in url
+    today = datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d")
+    assert core.market_date() != today
+    assert today not in core.endpoint_url(core.DATA_EXCHANGE_ENDPOINTS[0], "https://x")
+
+
+@pytest.mark.parametrize("hour,expected", [
+    (0, "2026-09-08"), (1, "2026-09-08"),      # before 2am: yesterday is not published
+    (2, "2026-09-09"), (3, "2026-09-09"),      # from 2am: yesterday is available
+    (23, "2026-09-09"),
+])
+def test_the_publish_boundary_is_two_am_est(hour, expected):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, hour, 30, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(when) == expected
+
+
+def test_a_clock_in_another_zone_is_converted_not_assumed():
+    """06:00 UTC is 01:00 EST - before the publish hour, so two days back.
+
+    The hour matters. This test used to pass 01:30 UTC, which lands in the
+    five-hour band where the converted and unconverted answers coincide: it
+    went green with the conversion deleted. Only 02:00-06:59 UTC tells the
+    two apart.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=ZoneInfo("UTC"))
+    assert core.market_date(when) == "2026-09-08"
+
+
+def test_a_naive_clock_is_read_as_est_not_as_the_machines_local_time():
+    """astimezone reads a naive value as the host's zone, so the same call
+    returned different days on a laptop in EDT and a server in UTC - and the
+    difference lands exactly on the 2am boundary this function exists for."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    naive = datetime(2026, 9, 10, 3, 0)
+    aware = datetime(2026, 9, 10, 3, 0, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(naive) == core.market_date(aware) == "2026-09-09"
+
+
+@pytest.mark.parametrize("hour,minute,expected", [
+    (2, 0, "2026-09-08"),      # 2am sharp: MISO may not have finished
+    (2, 14, "2026-09-08"),
+    (2, 15, "2026-09-09"),     # past the grace margin, yesterday is available
+    (2, 16, "2026-09-09"),
+])
+def test_the_publish_hour_carries_a_grace_margin(hour, minute, expected):
+    """MISO's "2am" is not to the second. Without a margin a publish that
+    slips by a minute made every cycle in that window take a 400, which reads
+    as an outage rather than as being early."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, hour, minute, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(when) == expected
+
+
+def test_the_registered_endpoints_are_pinned_by_name():
+    """Deleting a feed is a test failure, not a quieter cycle.
+
+    Every other assertion about this table iterates it, so it is vacuously
+    true over a shorter list: ten of the eleven could be removed - reverting
+    the feature - with the whole suite still green.
+    """
+    assert {e.key for e in core.DATA_EXCHANGE_ENDPOINTS} == {
+        "DEFuelMix", "DEActualLoad", "DEFuelOnMargin", "DEDayAheadDemand",
+        "DEDayAheadFuelMix", "DEClearedPhysical", "DEClearedVirtual",
+        "DEOfferedEcoMax", "DEOfferedEcoMin", "DENetScheduled", "DELoadForecast",
+    }
+
+
+# --- the paging pause budget ---------------------------------------------
+
+def test_a_pause_is_taken_from_the_cycles_budget(monkeypatch):
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    budget = core.PagePauseBudget(100)
+    assert budget.spend(60) is True
+    assert budget.remaining == 40
+    assert slept == [60]
+
+
+def test_a_cycle_stops_pausing_once_its_budget_is_spent(monkeypatch):
+    """The pauses are sequential and block every endpoint behind them. Twelve
+    paged endpoints pausing freely would sleep 44 minutes against a 300-second
+    cadence, and the live display feeds - the product - would stop refreshing
+    for all of it."""
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    budget = core.PagePauseBudget(60)
+    assert budget.spend(60) is True
+    assert budget.spend(60) is False     # and does not sleep anyway
+    assert slept == [60]
+
+
+def test_an_endpoint_that_runs_out_of_budget_fails_rather_than_hurrying(monkeypatch):
+    """Fetching the next page early would breach the rate limit the pause
+    exists to keep, and the penalty is an IP ban we cannot undo. A loud
+    failure retries next cycle; a hurried fetch cannot be undone."""
+    calls = []
+
+    def fake_fetch(endpoint, url):
+        calls.append(url)
+        body = {"data": [{"region": "NORTH"}],
+                "page": {"lastPage": False, "pageNumber": len(calls)}}
+        return {"ok": True, "content": json.dumps(body).encode(),
+                "status": 200, "bytes": 1, "error": None}
+
+    monkeypatch.setattr(core, "_fetch", fake_fetch)
+    monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 60)
+    endpoint = core.DATA_EXCHANGE_ENDPOINTS[0]
+    result = core._fetch_all_pages(endpoint, "https://x/y", core.PagePauseBudget(0))
+    assert result["ok"] is False
+    assert "budget" in result["error"]
+    assert len(calls) == 1               # page two was never requested
 
 
 def test_a_path_without_a_date_is_left_alone():
@@ -133,11 +262,35 @@ def test_a_path_without_a_date_is_left_alone():
 ])
 def test_shape_gate_rejects_anything_without_regions(body):
     """The point of this endpoint is region. A payload without it is not it."""
-    assert core._shape_de_fueltype(body) is False
+    assert core._shape_de_regional(body) is False
+
+
+def test_one_gate_serves_every_region_endpoint():
+    """The twelve operations differ in their value fields - load, nsi, supply,
+    mustRun - but share the {data, page} envelope and a region on every row."""
+    for values in ({"load": 1.0}, {"nsi": -2.0}, {"supply": 3.0},
+                   {"mustRun": 1, "economic": 2, "emergency": 3},
+                   {"fuelTypes": {"wind": 5.0}, "totalMw": 5.0}):
+        body = {"data": [{"region": "NORTH", **values}], "page": {"lastPage": True}}
+        assert core._shape_de_regional(body) is True
+
+
+def test_every_registered_endpoint_has_a_transformer():
+    """A polled endpoint with no ingest entry writes a file nothing reads."""
+    from backend.rag.ingest_api import ENDPOINTS_CONFIG
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        assert f"{endpoint.key}.json" in ENDPOINTS_CONFIG, endpoint.key
+
+
+def test_every_registered_endpoint_is_region_scoped_and_dated():
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        assert "{date}" in endpoint.path, endpoint.key
+        assert endpoint.path.startswith("/lgi/"), endpoint.key
+        assert endpoint.paged is True, endpoint.key
 
 
 def test_shape_gate_accepts_a_real_page():
-    assert core._shape_de_fueltype(page(ROWS)) is True
+    assert core._shape_de_regional(page(ROWS)) is True
 
 
 # --- paging --------------------------------------------------------------
@@ -274,3 +427,64 @@ def test_page_parameters_are_appended():
 def test_page_parameters_join_an_existing_query_string():
     url = core._page_url("https://x/f?region=NORTH", 1)
     assert url.count("?") == 1 and "&pageNumber=1" in url
+
+
+def test_the_paged_endpoints_rotate_so_the_budget_does_not_starve_the_same_ones():
+    """The budget is spent in list order, so a fixed order starves the tail
+    every cycle rather than the "retries next cycle" the budget promises -
+    the first two would win forever and the other nine never refresh."""
+    core._paged_rotation = 0
+    endpoints = core.ENDPOINTS + core.DATA_EXCHANGE_ENDPOINTS
+    firsts = []
+    for _ in range(len(core.DATA_EXCHANGE_ENDPOINTS)):
+        order = core.cycle_order(endpoints)
+        assert [e.key for e in order[:4]] == [e.key for e in core.ENDPOINTS]
+        firsts.append(order[4].key)
+    # every paged endpoint gets first crack within one full rotation
+    assert set(firsts) == {e.key for e in core.DATA_EXCHANGE_ENDPOINTS}
+
+
+def test_an_unpaged_only_cycle_keeps_its_order():
+    core._paged_rotation = 0
+    order = core.cycle_order(list(core.ENDPOINTS))
+    assert [e.key for e in order] == [e.key for e in core.ENDPOINTS]
+
+
+def test_a_data_exchange_payload_survives_a_cycle_without_a_key(tmp_path):
+    """A key that is unset - or expires mid-demo - makes eleven endpoints
+    inactive without removing them from the table. Pruning their payloads
+    would strand the documents already in Chroma: present, unrefreshable, with
+    no source on disk. Every other prune test passes a key that genuinely left
+    the code, so none of them exercised this."""
+    (tmp_path / "DEFuelMix.json").write_bytes(b"{}")
+    (tmp_path / "DEActualLoad.json").write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {"DEFuelMix": {}, "DEActualLoad": {}},
+                         {"FuelMix": {}})
+    assert (tmp_path / "DEFuelMix.json").exists()
+    assert (tmp_path / "DEActualLoad.json").exists()
+
+
+def test_an_endpoint_that_really_left_the_code_is_still_pruned(tmp_path):
+    """The other half: the guard above must not turn pruning off entirely."""
+    (tmp_path / "RetiredFeed.json").write_bytes(b"{}")
+    core._prune_payloads(tmp_path, {"RetiredFeed": {}}, {"FuelMix": {}})
+    assert not (tmp_path / "RetiredFeed.json").exists()
+
+
+def test_the_forecast_endpoint_is_asked_for_today_not_the_market_day():
+    """market_date() is yesterday because the settled endpoints 400 on today.
+    Applied blanket, it stored a forecast for a day that had already ended,
+    and "what is the load forecast?" was answered from it with today's date on
+    the chart. The forecast endpoint does serve the current date."""
+    forecast = next(e for e in core.DATA_EXCHANGE_ENDPOINTS if e.key == "DELoadForecast")
+    assert forecast.date_mode == "today"
+    assert core.endpoint_url(forecast, "") == f"/lgi/v1/forecast/{core.today_est()}/load"
+
+
+def test_every_other_data_exchange_endpoint_still_asks_for_the_market_day():
+    """The settled feeds answer 400 for today; only the forecast is exempt."""
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        if endpoint.key == "DELoadForecast":
+            continue
+        assert endpoint.date_mode == "market", endpoint.key
+        assert core.market_date() in core.endpoint_url(endpoint, ""), endpoint.key

@@ -15,7 +15,7 @@ const SUGGESTED_QUESTIONS = [
   "Where did the LMP report's MLC column go in the new API?",
 ];
 
-const CONTACT_URL = "https://www.misoenergy.org/about/contact-us/";
+const CONTACT_URL = "https://www.misoenergy.org/meet-miso/contact-us/";
 
 // Crosswalk answers always name the API host; that is how we know to offer the CSV.
 const CROSSWALK_HINT = /apim\.misoenergy\.org/;

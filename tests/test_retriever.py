@@ -1,4 +1,4 @@
-"""search_docs: two lanes, one seat each, and the citations that come out.
+"""search_docs: three lanes, each with its own budget, and the citations.
 
 The lane split exists because of a real failure - one shared top-k let Fact
 Sheet chunks crowd the live numbers out of "what are grid conditions?". These
@@ -62,15 +62,69 @@ LIVE = Node("Wind is 1,500 MW.", "live_snapshot", "WindSolar Display",
             "https://www.misoenergy.org/live", endpoint="WindSolar", as_of="09:25 EST")
 DOC = Node("Market Reports hold historical LMPs.", "reference_doc",
            "Market Reports catalog", "https://www.misoenergy.org/reports")
+SETTLED = Node("MISO actual load by region for the completed market day.",
+               "settled_market_day", "MISO Data Exchange - actual load",
+               "https://data-exchange.misoenergy.org/x",
+               endpoint="DEActualLoad", as_of="2026-09-09T23:00:00")
 
 
 # --- the lane split -------------------------------------------------------
 
 def test_each_lane_is_searched_separately_with_its_own_budget(index):
-    fake = index({"live_snapshot": [LIVE], "reference_doc": [DOC]})
+    fake = index({"live_snapshot": [LIVE], "settled_market_day": [SETTLED],
+                  "reference_doc": [DOC]})
     retriever.search_docs("grid conditions")
-    assert fake.asked == {"live_snapshot": retriever.LIVE_TOP_K,
-                          "reference_doc": retriever.DOC_TOP_K}
+    # literals, not the constants: asserting a constant against itself passes
+    # for any value it is given, so widening a budget back into the crowding
+    # bug would not fail here
+    assert fake.asked == {"live_snapshot": 3, "settled_market_day": 3,
+                          "reference_doc": 4}
+
+
+def test_the_live_lane_can_seat_a_whole_grid_question(index):
+    """"What share of load is wind serving right now" needs the wind feed, the
+    load feed and the fuel mix at once. Two seats cut one of the three, and
+    the entire live corpus is four short paragraphs."""
+    live = [Node(f"live {i}", "live_snapshot", f"L{i}", f"https://l/{i}",
+                 endpoint=f"L{i}", as_of="09:25 EST") for i in range(4)]
+    index({"live_snapshot": live, "settled_market_day": [], "reference_doc": []})
+    context, _, _ = retriever.search_docs("what share of load is wind serving right now")
+    assert context.count("live ") >= 3
+
+
+def test_a_settled_market_day_cannot_crowd_out_the_live_feeds(index):
+    """The regression this lane exists to prevent. Eleven settled documents
+    share an opening sentence, embed as a near-duplicate block, and took every
+    seat on "total generation right now" - answering from yesterday while the
+    live feed that knew the answer was cut.
+    """
+    settled = [Node(f"settled {i}", "settled_market_day", f"DE{i}",
+                    f"https://x/{i}", endpoint=f"DE{i}", as_of="2026-09-09T23:00:00")
+               for i in range(11)]
+    index({"live_snapshot": [LIVE], "settled_market_day": settled, "reference_doc": []})
+    context, _, as_of = retriever.search_docs("total generation right now")
+    assert "Wind is 1,500 MW." in context
+    # and the answer is stamped with the live time, not yesterday's
+    assert as_of == "09:25 EST"
+
+
+def test_a_settled_as_of_never_stamps_the_answer(index):
+    """Stamping an answer with yesterday says the whole answer is a day old,
+    even when the live feeds supplied it."""
+    settled = Node("settled", "settled_market_day", "DE", "https://x",
+                   endpoint="DE", as_of="2026-09-09T23:00:00")
+    index({"live_snapshot": [], "settled_market_day": [settled], "reference_doc": []})
+    _, _, as_of = retriever.search_docs("q")
+    assert as_of is None
+
+
+def test_one_document_per_endpoint_in_the_settled_lane_too(index):
+    older = Node("older", "settled_market_day", "DE", "https://x", endpoint="DEFuelMix")
+    newer = Node("newer", "settled_market_day", "DE", "https://x", endpoint="DEFuelMix")
+    index({"live_snapshot": [], "settled_market_day": [newer, older],
+           "reference_doc": []})
+    context, _, _ = retriever.search_docs("q")
+    assert "newer" in context and "older" not in context
 
 
 def test_live_snapshots_come_first(index):
@@ -164,3 +218,40 @@ def test_an_empty_store_returns_empty_context_rather_than_raising(index):
     index({"live_snapshot": [], "reference_doc": []})
     context, sources, as_of = retriever.search_docs("q")
     assert context == "" and sources == [] and as_of is None
+
+
+# --- which live stamp reaches the answer ----------------------------------
+
+def test_the_answer_is_stamped_with_the_freshest_live_feed_not_the_first(index):
+    """The lanes come back in score order, so a question that ranked WindSolar
+    above the fuel mix was stamped 19:00 while the answer body quoted 19:45 -
+    the header contradicting the paragraph directly under it. Measured on 7 of
+    43 real questions."""
+    older = Node("wind", "live_snapshot", "WindSolar", "https://w",
+                 endpoint="WindSolar", as_of="10-Sep-2026 - Interval 19:00 EST")
+    newer = Node("mix", "live_snapshot", "FuelMix", "https://f",
+                 endpoint="FuelMix", as_of="10-Sep-2026 - Interval 19:45 EST")
+    index({"live_snapshot": [older, newer], "settled_market_day": [],
+           "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "10-Sep-2026 - Interval 19:45 EST"
+
+
+def test_the_two_live_stamp_formats_are_compared_not_sorted_as_text(index):
+    """The Snapshot stamps a clock time and the other three an interval. As
+    strings "9/10/2026..." sorts after "10-Sep-2026..." whatever the hour."""
+    interval = Node("mix", "live_snapshot", "FuelMix", "https://f",
+                    endpoint="FuelMix", as_of="10-Sep-2026 - Interval 19:00 EST")
+    clock = Node("snap", "live_snapshot", "Snapshot", "https://s",
+                 endpoint="Snapshot", as_of="9/10/2026 8:25:00 PM EST")
+    index({"live_snapshot": [interval, clock], "settled_market_day": [],
+           "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "9/10/2026 8:25:00 PM EST"
+
+
+def test_an_unrecognized_stamp_still_reaches_the_answer(index):
+    """MISO drops RefId occasionally and the transformer says "Recent
+    Interval". That is worth showing; dropping it would be a blank stamp."""
+    odd = Node("x", "live_snapshot", "FuelMix", "https://f",
+               endpoint="FuelMix", as_of="Recent Interval")
+    index({"live_snapshot": [odd], "settled_market_day": [], "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "Recent Interval"

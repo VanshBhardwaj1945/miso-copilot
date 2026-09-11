@@ -1905,11 +1905,22 @@ def stub_counts(base):
     return requests.get(base + "/_counts", timeout=5).json()
 
 
-def test_a_keyed_cycle_against_the_stub_polls_five_links(raw, de_stub):
+def test_a_keyed_cycle_against_the_stub_polls_every_registered_link(raw, de_stub):
+    """Every endpoint in the table, over real HTTP, with a file to show for it.
+
+    Written against the whole table rather than a number: this assertion used
+    to read `== 5` while ten of the fifteen endpoints 404'd every run, so the
+    suite recorded the breakage as the expected result. A wrong path on any
+    feed now fails here instead of reaching production.
+    """
     base = de_stub()
     status = core.poll_once()
-    assert core.succeeded_count(status) == 5
-    assert stub_counts(base)["counts"][stub_server.DE_PATH] == 1
+    assert core.succeeded_count(status) == len(core.active_endpoints())
+    for endpoint in core.active_endpoints():
+        assert (raw / f"{endpoint.key}.json").exists(), endpoint.key
+    counts = stub_counts(base)["counts"]
+    for path in stub_server.DE_LINKS:
+        assert counts[path] == 1, path
 
 
 def test_a_multi_page_data_exchange_fetch_lands_as_one_file(raw, de_stub):
@@ -1921,7 +1932,7 @@ def test_a_multi_page_data_exchange_fetch_lands_as_one_file(raw, de_stub):
     base = de_stub(modes=["de-paged"], de_pages=3)
     status = core.poll_once()
 
-    assert core.succeeded_count(status) == 5
+    assert core.succeeded_count(status) == len(core.active_endpoints())
     body = json.loads((raw / "DEFuelMix.json").read_bytes())
     assert [row["region"] for row in body["data"]] == ["NORTH", "CENTRAL", "SOUTH"]
     assert body["page"]["lastPage"] is True
@@ -1955,12 +1966,20 @@ def test_the_paged_endpoint_claims_one_lease_for_the_whole_cycle(raw, de_stub,
     monkeypatch.setattr(guard, "claim", counting_claim)
     status = core.poll_once()
 
-    assert core.succeeded_count(status) == 5
-    de_claims = [url for url in claimed if "generation/fuel-type" in url]
+    # the claims below hold whether or not a byte was fetched - the guard runs
+    # before the request - so without this the test passed with every endpoint
+    # failing, which is the outage it would most need to catch
+    assert core.succeeded_count(status) == len(core.active_endpoints())
+
+    # one claim for THIS link, however many pages it took. Scoped to the
+    # real-time path because the stub serves the day-ahead fuel-type link too,
+    # and one claim each is exactly right.
+    de_claims = [u for u in claimed if "real-time" in u and "generation/fuel-type" in u]
     assert len(de_claims) == 1
     # the link, not a page of it: the guard key must not vary per page
     assert "pageNumber" not in de_claims[0]
-    assert len(claimed) == len(LEGACY_KEYS) + 1
+    # and every endpoint in the cycle claimed exactly once
+    assert len(claimed) == len(set(claimed)) == len(core.active_endpoints())
 
 
 def test_the_subscription_key_is_sent_as_the_apim_header(raw, de_stub):
@@ -1968,7 +1987,10 @@ def test_the_subscription_key_is_sent_as_the_apim_header(raw, de_stub):
     writes on failure and the base URL in _status.json."""
     base = de_stub()
     core.poll_once()
-    assert stub_counts(base)["de_keys"] == ["stub-subscription-key"]
+    keys = stub_counts(base)["de_keys"]
+    # one per Data Exchange link: a header attached to the first request and
+    # dropped on the other ten would otherwise pass
+    assert keys == ["stub-subscription-key"] * len(stub_server.DE_LINKS)
 
 
 def test_the_stub_refuses_an_unkeyed_data_exchange_request(de_stub):

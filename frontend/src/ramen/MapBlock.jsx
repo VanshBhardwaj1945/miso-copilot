@@ -25,6 +25,11 @@ function parseSpec(spec) {
   }
   if (!cfg || typeof cfg !== "object") return null;
   if (!Array.isArray(cfg.highlight)) return null;
+  // The drawing never trusts `highlight`, but `title` and `label` are
+  // rendered as React children - an object there throws, and an uncaught
+  // render error unmounts the whole root.
+  if (cfg.title !== undefined && typeof cfg.title !== "string") return null;
+  if (cfg.label !== undefined && typeof cfg.label !== "string") return null;
   return cfg;
 }
 
@@ -83,6 +88,7 @@ export default function MapBlock({ spec }) {
               key="MB"
               d={MANITOBA.d}
               fill={lit ? FILL_HIGHLIGHT : FILL_FOOTPRINT}
+              fillOpacity={lit ? 1 : 0.28}
               stroke={STROKE}
               strokeWidth={1}
             >
