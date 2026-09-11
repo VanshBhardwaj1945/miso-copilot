@@ -177,3 +177,39 @@ def test_without_a_key_the_data_exchange_feeds_are_not_expected(monkeypatch):
 
 def test_with_a_key_every_registered_feed_is_expected(keyed):
     assert set(ingest_api.expected_endpoints()) == set(ingest_api.ENDPOINTS_CONFIG)
+
+
+def test_a_long_settled_document_is_never_split(raw_dir, keyed):
+    """Architecture rule 7: snapshots are one document, never chunked. The
+    Settings splitter is sized for the 512-token reference chunks, and the day
+    ranges pushed three feeds past it. Nothing surfaced, because the retriever
+    keeps one document per endpoint - so the second chunk was unreachable, and
+    being the tail of the prose it was always the last region. MISO South lost
+    its day range and the answer said so."""
+    rows = []
+    for hour in range(24):
+        for region in ("NORTH", "CENTRAL", "SOUTH"):
+            rows.append({"timeInterval": {"start": f"2026-09-09T{hour:02d}:00:00"},
+                         "region": region, "mustRun": 10000.0 + hour,
+                         "economic": 20000.0 + hour, "emergency": 3000.0 + hour})
+    (raw_dir / "DEOfferedEcoMax.json").write_text(json.dumps({"data": rows}))
+    assert ingest_api.sync_raw_snapshots(raw_dir)["DEOfferedEcoMax.json"] is True
+
+    got = store.get_chroma_collection().get(
+        where={"doc_id": "miso_snapshot_deofferedecomax"}, include=["documents"])
+    assert len(got["ids"]) == 1, f"split into {len(got['ids'])} chunks"
+    # the tail survives: the last region's day range is what used to be lost
+    assert "MISO South" in got["documents"][0]
+
+
+def test_re_syncing_a_long_document_still_replaces_rather_than_appends(raw_dir, keyed):
+    """The eviction finds rows by doc_id, which insert_nodes does not mint -
+    so it is set explicitly, and this is what proves it."""
+    rows = [{"timeInterval": {"start": f"2026-09-09T{h:02d}:00:00"},
+             "region": "SOUTH", "load": 1000.0 + h} for h in range(24)]
+    (raw_dir / "DEActualLoad.json").write_text(json.dumps({"data": rows}))
+    ingest_api.sync_raw_snapshots(raw_dir)
+    ingest_api.sync_raw_snapshots(raw_dir)
+    got = store.get_chroma_collection().get(
+        where={"doc_id": "miso_snapshot_deactualload"}, include=["documents"])
+    assert len(got["ids"]) == 1

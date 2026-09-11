@@ -245,3 +245,23 @@ def test_entries_without_params_or_shape_still_produce_rows(monkeypatch, tmp_pat
         "endpoint": "GET /x", "base_url": "https://x", "new_field": "b",
         "note": "", "params": "", "shape": "", "readers_guide": "https://guide",
     }]
+
+
+def test_a_broken_vector_store_is_a_503_not_an_uncaught_500(client, monkeypatch):
+    """A second process writing Chroma while the server is up poisons the
+    client for the life of the process - and running the poller by hand does
+    it. Uncaught, every question afterward was a 500 until someone restarted
+    the server, which on stage means the demo is over."""
+    monkeypatch.setattr(claude, "client", object())
+    monkeypatch.setattr(claude, "answer_question",
+                        raises(RuntimeError("Error executing plan: Error finding id")))
+    r = client.post("/ask", json={"question": "q"})
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()
+
+
+def test_a_broken_vector_store_is_still_logged_as_a_failure(client, monkeypatch):
+    monkeypatch.setattr(claude, "client", object())
+    monkeypatch.setattr(claude, "answer_question", raises(RuntimeError("boom")))
+    client.post("/ask", json={"question": "q"})
+    assert json.loads(security.LOG_PATH.read_text().strip())["outcome"] == "failed"

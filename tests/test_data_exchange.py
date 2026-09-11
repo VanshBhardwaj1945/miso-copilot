@@ -469,3 +469,22 @@ def test_an_endpoint_that_really_left_the_code_is_still_pruned(tmp_path):
     (tmp_path / "RetiredFeed.json").write_bytes(b"{}")
     core._prune_payloads(tmp_path, {"RetiredFeed": {}}, {"FuelMix": {}})
     assert not (tmp_path / "RetiredFeed.json").exists()
+
+
+def test_the_forecast_endpoint_is_asked_for_today_not_the_market_day():
+    """market_date() is yesterday because the settled endpoints 400 on today.
+    Applied blanket, it stored a forecast for a day that had already ended,
+    and "what is the load forecast?" was answered from it with today's date on
+    the chart. The forecast endpoint does serve the current date."""
+    forecast = next(e for e in core.DATA_EXCHANGE_ENDPOINTS if e.key == "DELoadForecast")
+    assert forecast.date_mode == "today"
+    assert core.endpoint_url(forecast, "") == f"/lgi/v1/forecast/{core.today_est()}/load"
+
+
+def test_every_other_data_exchange_endpoint_still_asks_for_the_market_day():
+    """The settled feeds answer 400 for today; only the forecast is exempt."""
+    for endpoint in core.DATA_EXCHANGE_ENDPOINTS:
+        if endpoint.key == "DELoadForecast":
+            continue
+        assert endpoint.date_mode == "market", endpoint.key
+        assert core.market_date() in core.endpoint_url(endpoint, ""), endpoint.key

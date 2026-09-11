@@ -124,6 +124,10 @@ class Endpoint(NamedTuple):
     # so adding them changed nothing about those four.
     source: str = PUBLIC              # PUBLIC or DATA_EXCHANGE
     paged: bool = False               # follow page.lastPage and concatenate
+    # Which day fills {date}. "market" is the completed market day every
+    # settled endpoint serves; "today" is for the forecast, which is the one
+    # forward-looking feed and does serve the current date.
+    date_mode: str = "market"
 
 
 # Snapshot is exempt from the ref_id gate and has no frozen-feed signal,
@@ -161,19 +165,19 @@ def _shape_de_regional(body: object) -> bool:
 # reserve zone is not North/Central/South.
 DATA_EXCHANGE_ENDPOINTS = [
     Endpoint(key, path, _shape_de_regional, None,
-             source=DATA_EXCHANGE, paged=True)
-    for key, path in (
-        ("DEFuelMix", "/lgi/v1/real-time/{date}/generation/fuel-type"),
-        ("DEActualLoad", "/lgi/v1/real-time/{date}/demand/actual"),
-        ("DEFuelOnMargin", "/lgi/v1/real-time/{date}/generation/fuel-on-the-margin"),
-        ("DEDayAheadDemand", "/lgi/v1/day-ahead/{date}/demand"),
-        ("DEDayAheadFuelMix", "/lgi/v1/day-ahead/{date}/generation/fuel-type"),
-        ("DEClearedPhysical", "/lgi/v1/day-ahead/{date}/generation/cleared/physical"),
-        ("DEClearedVirtual", "/lgi/v1/day-ahead/{date}/generation/cleared/virtual"),
-        ("DEOfferedEcoMax", "/lgi/v1/day-ahead/{date}/generation/offered/ecomax"),
-        ("DEOfferedEcoMin", "/lgi/v1/day-ahead/{date}/generation/offered/ecomin"),
-        ("DENetScheduled", "/lgi/v1/day-ahead/{date}/interchange/net-scheduled"),
-        ("DELoadForecast", "/lgi/v1/forecast/{date}/load"),
+             source=DATA_EXCHANGE, paged=True, date_mode=mode)
+    for key, path, mode in (
+        ("DEFuelMix", "/lgi/v1/real-time/{date}/generation/fuel-type", "market"),
+        ("DEActualLoad", "/lgi/v1/real-time/{date}/demand/actual", "market"),
+        ("DEFuelOnMargin", "/lgi/v1/real-time/{date}/generation/fuel-on-the-margin", "market"),
+        ("DEDayAheadDemand", "/lgi/v1/day-ahead/{date}/demand", "market"),
+        ("DEDayAheadFuelMix", "/lgi/v1/day-ahead/{date}/generation/fuel-type", "market"),
+        ("DEClearedPhysical", "/lgi/v1/day-ahead/{date}/generation/cleared/physical", "market"),
+        ("DEClearedVirtual", "/lgi/v1/day-ahead/{date}/generation/cleared/virtual", "market"),
+        ("DEOfferedEcoMax", "/lgi/v1/day-ahead/{date}/generation/offered/ecomax", "market"),
+        ("DEOfferedEcoMin", "/lgi/v1/day-ahead/{date}/generation/offered/ecomin", "market"),
+        ("DENetScheduled", "/lgi/v1/day-ahead/{date}/interchange/net-scheduled", "market"),
+        ("DELoadForecast", "/lgi/v1/forecast/{date}/load", "today"),
         # forecast/{date}/outage is the twelfth region-scoped operation and is
         # deliberately absent: it answered 404 "Empty data returned for date"
         # for every day tested between 2026-09-03 and 2026-09-09. MISO is not
@@ -241,11 +245,24 @@ def market_date(now: datetime | None = None) -> str:
     return (est - timedelta(days=back)).strftime("%Y-%m-%d")
 
 
+def today_est() -> str:
+    """Today in fixed EST - the date the forecast endpoint is asked for."""
+    return datetime.now(ZoneInfo("EST")).strftime("%Y-%m-%d")
+
+
 def endpoint_url(endpoint: Endpoint, base: str) -> str:
-    """The full URL, with {date} filled in."""
+    """The full URL, with {date} filled in.
+
+    market_date() is yesterday, because the settled endpoints 400 on today.
+    Applying that to /forecast/{date}/load - the one forward-looking feed -
+    stored a forecast for a day that had already ended, and "what is the load
+    forecast?" was answered from it with today's date on the chart. That
+    endpoint serves the current date; this is the line that asks for it.
+    """
     path = endpoint.path
     if "{date}" in path:
-        path = path.replace("{date}", market_date())
+        day = today_est() if endpoint.date_mode == "today" else market_date()
+        path = path.replace("{date}", day)
     return base + path
 
 

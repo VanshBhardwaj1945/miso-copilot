@@ -69,10 +69,19 @@ def transform_load(data: dict) -> tuple[str, str, str]:
         lines.append(f"- Current 5-Minute Actual Load: {val:,.0f} MW (interval {time_str})")
 
     if forecast:
-        next_fc = forecast[0].get("Forecast", {})
-        fc_val = _safe_float(next_fc.get("LoadForecast", 0))
-        he = next_fc.get("HourEnding", "")
-        lines.append(f"- Day-Ahead Forecasted Load: {fc_val:,.0f} MW (Hour Ending {he})")
+        # forecast[0] is Hour Ending 1 - 1 AM - which read as "the forecast"
+        # beside an 8 PM actual. The whole curve is here, so report the day's
+        # peak, which is what the question "what is MISO forecasting" means.
+        hours = [f.get("Forecast", {}) for f in forecast]
+        peak = max(hours, key=lambda h: _safe_float(h.get("LoadForecast", 0)),
+                   default={})
+        if peak:
+            lines.append(
+                f"- Day-Ahead Forecast Peak: "
+                f"{_safe_float(peak.get('LoadForecast', 0)):,.0f} MW "
+                f"(Hour Ending {peak.get('HourEnding', '')})")
+            lines.append(f"- Day-Ahead Forecast covers {len(hours)} hours; "
+                         f"the peak above is the highest of them.")
 
     lines.append(f"Source: MISO Real-Time Total Load ({MISO_DISPLAY_URL})")
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
@@ -146,11 +155,18 @@ def transform_windsolar(data: dict) -> tuple[str, str, str]:
         lines.append(f"- Latest Actual Solar Output: {s_val:,.1f} MW (recorded {ts})")
 
     if instances:
-        fc = instances[0]
-        fc_w = _safe_float(fc.get("ForecastWindValue", 0))
-        fc_s = _safe_float(fc.get("ForecastSolarValue", 0))
-        lines.append(f"- Day-Ahead Forecasted Wind: {fc_w:,.1f} MW")
-        lines.append(f"- Day-Ahead Forecasted Solar: {fc_s:,.1f} MW")
+        # instances[0] is midnight, so this printed "Day-Ahead Forecasted
+        # Solar: 0.0 MW" directly beneath an evening actual of 2,074 MW - an
+        # attendee reads that as MISO forecasting no solar. The forecast is a
+        # curve; its peak is the number that means something.
+        peak_w = max((_safe_float(r.get("ForecastWindValue", 0)) for r in instances),
+                     default=0.0)
+        peak_s = max((_safe_float(r.get("ForecastSolarValue", 0)) for r in instances),
+                     default=0.0)
+        lines.append(f"- Day-Ahead Forecast Peak Wind: {peak_w:,.1f} MW "
+                     f"(highest hour of the forecast day)")
+        lines.append(f"- Day-Ahead Forecast Peak Solar: {peak_s:,.1f} MW "
+                     f"(highest hour of the forecast day; solar is zero overnight)")
 
     lines.append(f"Source: MISO Wind & Solar Report ({MISO_DISPLAY_URL})")
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL

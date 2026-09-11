@@ -218,3 +218,40 @@ def test_an_empty_store_returns_empty_context_rather_than_raising(index):
     index({"live_snapshot": [], "reference_doc": []})
     context, sources, as_of = retriever.search_docs("q")
     assert context == "" and sources == [] and as_of is None
+
+
+# --- which live stamp reaches the answer ----------------------------------
+
+def test_the_answer_is_stamped_with_the_freshest_live_feed_not_the_first(index):
+    """The lanes come back in score order, so a question that ranked WindSolar
+    above the fuel mix was stamped 19:00 while the answer body quoted 19:45 -
+    the header contradicting the paragraph directly under it. Measured on 7 of
+    43 real questions."""
+    older = Node("wind", "live_snapshot", "WindSolar", "https://w",
+                 endpoint="WindSolar", as_of="10-Sep-2026 - Interval 19:00 EST")
+    newer = Node("mix", "live_snapshot", "FuelMix", "https://f",
+                 endpoint="FuelMix", as_of="10-Sep-2026 - Interval 19:45 EST")
+    index({"live_snapshot": [older, newer], "settled_market_day": [],
+           "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "10-Sep-2026 - Interval 19:45 EST"
+
+
+def test_the_two_live_stamp_formats_are_compared_not_sorted_as_text(index):
+    """The Snapshot stamps a clock time and the other three an interval. As
+    strings "9/10/2026..." sorts after "10-Sep-2026..." whatever the hour."""
+    interval = Node("mix", "live_snapshot", "FuelMix", "https://f",
+                    endpoint="FuelMix", as_of="10-Sep-2026 - Interval 19:00 EST")
+    clock = Node("snap", "live_snapshot", "Snapshot", "https://s",
+                 endpoint="Snapshot", as_of="9/10/2026 8:25:00 PM EST")
+    index({"live_snapshot": [interval, clock], "settled_market_day": [],
+           "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "9/10/2026 8:25:00 PM EST"
+
+
+def test_an_unrecognized_stamp_still_reaches_the_answer(index):
+    """MISO drops RefId occasionally and the transformer says "Recent
+    Interval". That is worth showing; dropping it would be a blank stamp."""
+    odd = Node("x", "live_snapshot", "FuelMix", "https://f",
+               endpoint="FuelMix", as_of="Recent Interval")
+    index({"live_snapshot": [odd], "settled_market_day": [], "reference_doc": []})
+    assert retriever.search_docs("q")[2] == "Recent Interval"

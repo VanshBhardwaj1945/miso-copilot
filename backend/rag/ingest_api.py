@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from llama_index.core.schema import Document
+from llama_index.core.schema import (
+    NodeRelationship,
+    RelatedNodeInfo,
+    TextNode,
+)
 
 # imported for its side effect: backend.config loads .env into os.environ.
 # Without it a caller that has not already imported config reads no key and
@@ -171,8 +175,15 @@ def upsert_single_endpoint(filename: str, doc_id: str,
         log.debug("Could not list previous entries for %s (%s)", doc_id, err)
         stale_ids = []
 
-    # no chunking - snapshots are already one small paragraph
-    doc = Document(
+    # NO CHUNKING - architecture rule 7, and insert_nodes is what enforces it.
+    # index.insert() runs the Settings splitter, which is sized for the 512-token
+    # reference chunks, and the day ranges pushed three of these documents past
+    # it: DEFuelMix, DEOfferedEcoMax and DEOfferedEcoMin each split in two.
+    # Nothing surfaced, because the retriever keeps one document per endpoint -
+    # so the second chunk was silently unreachable, and being the tail of the
+    # prose it was always the last region's numbers. MISO South lost its day
+    # range and Claude said so: "no intraday high/low was returned".
+    node = TextNode(
         id_=doc_id,
         text=prose,
         metadata={
@@ -184,8 +195,13 @@ def upsert_single_endpoint(filename: str, doc_id: str,
         },
         excluded_embed_metadata_keys=["source_url", "title", "doc_type"],
     )
+    # The Chroma row's doc_id comes from the node's source relationship, not
+    # from its metadata - index.insert() used to set this for us. Without it
+    # every row lands with doc_id null, the UPSERT below finds nothing to
+    # evict, and the store grows a duplicate every cycle.
+    node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(node_id=doc_id)
 
-    index.insert(doc)
+    index.insert_nodes([node])
 
     # NEVER APPEND - evict the rows just replaced. Insert first, delete second:
     # deleting first leaves a window where a question retrieves no snapshot at

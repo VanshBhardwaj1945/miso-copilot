@@ -228,3 +228,33 @@ def test_an_unparseable_snapshot_stamp_falls_back_rather_than_crashing():
     from backend.rag.transformers import transform_snapshot
     assert transform_snapshot([{"t": "x", "v": "1", "d": "not a date"}])[1] == "not a date"
     assert transform_snapshot([])[1] == "Recent Interval"
+
+
+def test_the_load_forecast_reports_the_days_peak_not_hour_one():
+    """forecast[0] is Hour Ending 1 - 1 AM - and it read as "the forecast"
+    printed beside an 8 PM actual."""
+    from backend.rag.transformers import transform_load
+    prose, _, _ = transform_load({"LoadInfo": {
+        "RefId": "10-Sep-2026 - Interval 20:25 EST",
+        "FiveMinTotalLoad": [{"Load": {"Time": "20:25", "Value": "95139"}}],
+        "MediumTermLoadForecast": [
+            {"Forecast": {"HourEnding": "1", "LoadForecast": "78103"}},
+            {"Forecast": {"HourEnding": "17", "LoadForecast": "98729"}},
+        ]}})
+    assert "Day-Ahead Forecast Peak: 98,729 MW (Hour Ending 17)" in prose
+    assert "78,103" not in prose
+
+
+def test_the_solar_forecast_is_the_peak_not_midnight():
+    """instances[0] is midnight, so this printed "Day-Ahead Forecasted Solar:
+    0.0 MW" directly under an evening actual of 2,074 MW."""
+    from backend.rag.transformers import transform_windsolar
+    prose, _, _ = transform_windsolar({"RefId": "r", "instance": [
+        {"ActualDateTimeEST": "2026-09-10 12:00:00 AM", "ActualWindValue": "100",
+         "ActualSolarValue": "0", "ForecastWindValue": "200", "ForecastSolarValue": "0"},
+        {"ActualDateTimeEST": "2026-09-10 1:00:00 PM", "ActualWindValue": "300",
+         "ActualSolarValue": "2074", "ForecastWindValue": "400",
+         "ForecastSolarValue": "15687"},
+    ]})
+    assert "Peak Solar: 15,687.0 MW" in prose
+    assert "Forecasted Solar: 0.0 MW" not in prose

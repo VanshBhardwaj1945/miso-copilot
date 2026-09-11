@@ -9,7 +9,15 @@ from backend.config import CLAUDE_API_KEY, CONTACT_URL, MISO_HOME_URL, MODEL
 from backend.llm.prompts import SYSTEM_PROMPT
 from backend.rag.retriever import search_docs
 
-client = anthropic.Anthropic(api_key=CLAUDE_API_KEY) if CLAUDE_API_KEY else None
+# 30 s, not the SDK's 600 s read default. A hung call on the default holds the
+# request thread for ten minutes and the UI spins with no way to cancel - the
+# frontend fetch has no abort either. A question that has not come back in
+# 30 s is not going to be useful on stage anyway.
+CLAUDE_TIMEOUT_SECONDS = 30
+
+client = (anthropic.Anthropic(api_key=CLAUDE_API_KEY,
+                              timeout=CLAUDE_TIMEOUT_SECONDS)
+          if CLAUDE_API_KEY else None)
 
 # True returns the retrieved context verbatim, no Claude call - handy for testing retrieval
 FORCE_MOCK = False

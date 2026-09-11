@@ -9,6 +9,8 @@ every lane keeps a seat at the table and Claude decides what the question
 actually needs.
 """
 
+from datetime import datetime
+
 from llama_index.core.vector_stores import (
     FilterOperator,
     MetadataFilter,
@@ -35,6 +37,35 @@ SETTLED_TOP_K = 3   # eleven Data Exchange feeds: a completed market day, by reg
 DOC_TOP_K = 4       # the 512-token chunks, same budget as before the doc lane
 
 
+# The two shapes MISO's live feeds stamp themselves with. FuelMix, the load
+# feed and WindSolar carry a RefId interval; the Snapshot carries a clock time.
+_AS_OF_FORMATS = ("%d-%b-%Y - Interval %H:%M EST", "%m/%d/%Y %I:%M:%S %p EST")
+
+
+def _as_of_sort_key(stamp: str):
+    """When a live stamp refers to, or None if it is not one of MISO's shapes."""
+    for fmt in _AS_OF_FORMATS:
+        try:
+            return datetime.strptime(stamp.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _freshest(stamps: list) -> str | None:
+    """The newest of the live stamps that reached Claude.
+
+    Not the first. The lanes come back in score order, so a question that
+    ranked WindSolar above the fuel mix was stamped 19:00 while the answer
+    body quoted 19:45 - the header contradicting the paragraph under it.
+    Unparseable stamps keep their old behavior and fall back to rank order.
+    """
+    dated = [(when, s) for s in stamps if (when := _as_of_sort_key(s))]
+    if dated:
+        return max(dated)[1]
+    return stamps[0] if stamps else None
+
+
 def _retrieve(index, query: str, doc_type: str, top_k: int) -> list:
     """Top-k nodes of one lane, selected by the doc_type metadata every chunk carries."""
     only_this_lane = MetadataFilters(filters=[
@@ -58,7 +89,7 @@ def search_docs(query: str, top_k: int = DOC_TOP_K) -> tuple[str, list[dict], st
 
     context_blocks = []
     sources = []
-    latest_as_of = None
+    live_stamps = []
 
     seen_endpoints = set()
 
@@ -83,8 +114,8 @@ def search_docs(query: str, top_k: int = DOC_TOP_K) -> tuple[str, list[dict], st
         # and stamping an answer with it says the whole answer is a day old
         # even when the live feeds supplied it - which is how "total generation
         # right now" came back stamped 2026-09-09.
-        if meta.get("doc_type") == "live_snapshot" and meta.get("as_of") and not latest_as_of:
-            latest_as_of = meta.get("as_of")
+        if meta.get("doc_type") == "live_snapshot" and meta.get("as_of"):
+            live_stamps.append(meta["as_of"])
 
     context_str = "\n\n---\n\n".join(context_blocks)
-    return context_str, sources, latest_as_of
+    return context_str, sources, _freshest(live_stamps)

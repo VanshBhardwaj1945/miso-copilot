@@ -1,5 +1,6 @@
 """/ask and /health endpoints."""
 
+import logging
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field
 from backend import security
 from backend.llm import claude
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -43,6 +45,19 @@ def ask(req: AskRequest, request: Request):
         raise HTTPException(502, f"Claude API error ({e.status_code})")
     except anthropic.APIConnectionError:
         raise HTTPException(502, "Could not reach the Claude API")
+    except HTTPException:
+        raise
+    except Exception:
+        # Everything that is not Anthropic - which in practice means Chroma.
+        # A second process writing the store while this one is up poisons the
+        # client for the life of the process ("Error executing plan: Internal
+        # error: Error finding id"), and running the poller by hand is enough
+        # to do it. Uncaught, that escaped as a 500 per question, forever.
+        # A 503 says the same thing to the UI, which already degrades to the
+        # handoff - but it is logged with a traceback instead of vanishing
+        # into the server log as an unhandled error.
+        log.exception("Retrieval failed for a question")
+        raise HTTPException(503, "MISO data service is unavailable, try again shortly")
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         security.log_request(ip, req.question, outcome, elapsed_ms)
