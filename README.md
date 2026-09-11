@@ -25,11 +25,9 @@ crosswalk**: ask "where did the MLC column go?" and it names the endpoint and th
 
 ## How it works
 
-![MISO Ramen architecture](docs/architecture.svg)
+![MISO Ramen architecture](docs/architecture.png)
 
-Want the full picture? A more detailed version lives in
-[`docs/architecture-detailed.svg`](docs/architecture-detailed.svg)
-([PNG](docs/architecture-detailed.png)).
+**Wanna see how this could look in production?** [Press here for the cloud architecture.](infra/README.md)
 
 The key design choice: **we never call MISO's API at question time.** A background
 poller keeps a fresh local copy - every five minutes it refetches, then re-indexes
@@ -124,7 +122,7 @@ backend/
   poller/          #   5-min poller with a hard rate guard
 app.py             # Streamlit backup UI
 tests/             # poller test suite
-docs/              # architecture diagrams (simple + detailed + cloud reference)
+docs/              # architecture diagrams (the demo flow + cloud reference)
 infra/             # Terraform sketch of a future cloud deployment - reference only
 data/              # local data + vector store (gitignored)
 ```

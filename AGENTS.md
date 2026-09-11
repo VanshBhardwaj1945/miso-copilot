@@ -36,8 +36,8 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
 tests/                      # pytest suite for backend/poller/, plus the MISO stub
-docs/                       # architecture diagrams: architecture.svg (README) +
-                            #   architecture-detailed.svg/.png (full version) +
+docs/                       # architecture diagrams: architecture.png/.svg (the
+                            #   demo flow the README embeds) +
                             #   terraform-architecture.svg/.png (cloud reference)
 deploy/                     # the demo VM's pull-based CD: deploy.sh and the
                             #   systemd units. Not self-updating - see its README
@@ -208,9 +208,8 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
   iCloud-synced folder and iCloud drops such conflict copies, even inside `.git/`.
   If git errors oddly, look for them.
 - Docstrings state what a module does and what's stubbed/pending (see `app.py`).
-- If you change the architecture picture, update `docs/architecture.svg` (the
-  simple one the README embeds) and `docs/architecture-detailed.svg` (plus its
-  PNG render) - both are hand-edited SVG.
+- If you change the architecture picture, regenerate `docs/architecture.png`
+  (the demo flow the README embeds) and keep `docs/architecture.svg` in step.
 - Tests live in `tests/`, named for the behavior they protect rather than the
   function they call. Where a test exists because of a bug that actually
   happened, say so in a line above it - that is what stops someone deleting it
