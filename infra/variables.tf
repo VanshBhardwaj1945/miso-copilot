@@ -11,8 +11,8 @@ variable "location" {
   default     = "centralus"
 }
 
-variable "claude_api_key" {
-  description = "Anthropic API key - pass via TF_VAR_claude_api_key, never commit"
+variable "model_api_key" {
+  description = "Credential for the answer model - Claude today, but MISO could self-host the model or use any provider. Pass via TF_VAR_model_api_key, never commit"
   type        = string
   sensitive   = true
 }

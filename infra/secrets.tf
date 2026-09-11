@@ -9,9 +9,9 @@ resource "azurerm_key_vault" "main" {
   rbac_authorization_enabled = true
 }
 
-resource "azurerm_key_vault_secret" "claude_key" {
-  name         = "claude-api-key"
-  value        = var.claude_api_key
+resource "azurerm_key_vault_secret" "model_key" {
+  name         = "model-api-key"
+  value        = var.model_api_key
   key_vault_id = azurerm_key_vault.main.id
 }
 
