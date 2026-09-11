@@ -1,0 +1,11 @@
+[Unit]
+Description=Bring this host to origin/main
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=campbellreed
+WorkingDirectory=/opt/miso/app
+ExecStart=/opt/miso/deploy.sh
+StandardOutput=append:/opt/miso/deploy.log
+StandardError=append:/opt/miso/deploy.log

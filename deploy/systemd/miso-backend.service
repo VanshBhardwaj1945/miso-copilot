@@ -1,0 +1,17 @@
+[Unit]
+Description=MISO Copilot backend (FastAPI + 5-min poller)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=campbellreed
+WorkingDirectory=/opt/miso/app
+# one worker, always: the poller's scheduler starts in every worker and N
+# schedulers contend on one rate-guard lease file (AGENTS.md)
+ExecStart=/opt/miso/app/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

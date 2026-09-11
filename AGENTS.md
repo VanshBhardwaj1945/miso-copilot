@@ -39,6 +39,8 @@ tests/                      # pytest suite for backend/poller/, plus the MISO st
 docs/                       # architecture diagrams: architecture.svg (README) +
                             #   architecture-detailed.svg/.png (full version) +
                             #   terraform-architecture.svg/.png (cloud reference)
+deploy/                     # the demo VM's pull-based CD: deploy.sh and the
+                            #   systemd units. Not self-updating - see its README
 infra/                      # validated Terraform sketch of a future cloud
                             #   deployment - reference only, never applied
 data/                       # gitignored, never commit. Chroma persistence, plus
