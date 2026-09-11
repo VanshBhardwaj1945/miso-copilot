@@ -153,9 +153,18 @@ _FUEL_NAMES = {
 
 
 def _row_time(row: dict) -> str:
-    """The row's interval, as a sortable string. Missing sorts oldest."""
+    """The row's interval start, as a sortable ISO string. Missing sorts oldest.
+
+    `value` is only a fallback and only when it looks like a timestamp: on the
+    hourly feeds it is the hour number ("1".."24"), and comparing those as
+    strings puts "9" after "24".
+    """
     interval = row.get("timeInterval") or {}
-    return str(interval.get("start") or interval.get("value") or "")
+    start = str(interval.get("start") or "").strip()
+    if start:
+        return start
+    fallback = str(interval.get("value") or "").strip()
+    return fallback if "T" in fallback else ""
 
 
 def _latest_row_per_region(rows: list) -> dict:
@@ -305,6 +314,81 @@ def _dimension_label(row: dict) -> str:
     return ", ".join(str(row[d]) for d in _DIMENSIONS if row.get(d))
 
 
+def _clock(when: str) -> str:
+    """The HH:MM of an ISO interval start, for prose. Empty if unparseable."""
+    return when[11:16] if "T" in when and len(when) >= 16 else ""
+
+
+def _row_measures(row: dict) -> dict:
+    """Every numeric measure on one row, keyed by measure name.
+
+    fuelTypes is a per-fuel breakdown rather than a measure, and the row
+    already carries its sum as totalMw, so it is left out of the arithmetic.
+    """
+    found = {}
+    for key, value in row.items():
+        if key in _IGNORED or key in _DIMENSIONS or key == "fuelTypes":
+            continue
+        if isinstance(value, bool) or value is None or key not in _MEASURES:
+            continue
+        found[key] = _safe_float(value)
+    return found
+
+
+def _day_range(rows_here: list) -> dict:
+    """Per measure, the day's high and low for one region, and when each was.
+
+    Summed across the rows sharing an interval, because a dimensional feed
+    splits one region's interval over several rows - fuel-on-the-margin by
+    fuel, load forecast by zone - and that region's number for the interval is
+    the total, not whichever row happens to come first.
+
+    This exists because reporting only the final interval answered "what was
+    MISO Central's load yesterday?" with 41,040 MW, an overnight trough, when
+    the day peaked at 54,527 MW. The peak was in the payload and in no
+    document.
+    """
+    totals: dict = {}
+    for row in rows_here:
+        when = _row_time(row)
+        if not when:
+            continue
+        for key, amount in _row_measures(row).items():
+            bucket = totals.setdefault(key, {})
+            bucket[when] = bucket.get(when, 0.0) + amount
+    ranged = {}
+    for key, by_interval in totals.items():
+        if len(by_interval) < 2:
+            continue            # a single interval is not a range worth stating
+        high = max(by_interval.items(), key=lambda kv: kv[1])
+        low = min(by_interval.items(), key=lambda kv: kv[1])
+        if high[1] == low[1]:
+            continue            # flat all day: "peaked at 1 and bottomed at 1"
+        ranged[key] = (high, low)
+    return ranged
+
+
+def _day_sentence(ranged: dict) -> str:
+    """"load peaked at 54,527 MW (16:00 EST) and bottomed at 41,040 MW ..."."""
+    clauses = []
+    for key, ((high_when, high), (low_when, low)) in ranged.items():
+        label, unit = _MEASURES[key]
+        unit = f" {unit}" if unit else ""
+        clauses.append(f"{label} peaked at {high:,.0f}{unit} ({_clock(high_when)} EST) "
+                       f"and bottomed at {low:,.0f}{unit} ({_clock(low_when)} EST)")
+    return "; ".join(clauses)
+
+
+def _rows_by_region(rows: list) -> dict:
+    """Every row of the day, grouped by region code."""
+    grouped: dict = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("region"):
+            continue
+        grouped.setdefault(str(row["region"]).upper(), []).append(row)
+    return grouped
+
+
 def _rows_by_region_at_latest_interval(rows: list) -> dict:
     """Every row for each region at that region's newest interval.
 
@@ -325,41 +409,71 @@ def _rows_by_region_at_latest_interval(rows: list) -> dict:
     return newest
 
 
-def make_de_transformer(title: str, doc_url: str):
+def _describe_rows(rows_here: list) -> str:
+    """The measures on one region's rows at one interval, as a phrase."""
+    described = []
+    for row in rows_here:
+        measures = _measures(row)
+        dimension = _dimension_label(row)
+        if dimension and measures:
+            described.append(f"{dimension} ({measures})")
+        elif dimension or measures:
+            described.append(dimension or measures)
+    return "; ".join(described)
+
+
+# How a feed's day is described. A forecast is not a settlement, and calling
+# one "a settled market day, not live output" told the reader the opposite of
+# the truth about the only forward-looking feed in the set.
+FRAMING = {
+    "settled": ("the completed market day",
+                "This is a settled market day, not live output."),
+    "forecast": ("the forecast day",
+                 "This is a forecast MISO published in advance, not measured output."),
+}
+
+
+def make_de_transformer(title: str, doc_url: str, kind: str = "settled"):
     """A transformer for one region-scoped Data Exchange endpoint.
 
     Same contract as every other transformer: (data) -> (prose, as_of, url).
-    Reports the newest interval for each region, because a day's fetch holds
-    every interval and only the newest is the end state of that market day.
+
+    Each region gets the day's high and low plus its own final interval. Both
+    halves are load-bearing. The range is there because a settled market day
+    is a day, and answering "what was the load yesterday" with the 23:00 value
+    understated MISO Central by 25%. The per-region interval is there because
+    regions do not end together - on one real fuel-on-the-margin payload
+    CENTRAL ended at 23:55 and NO_REGION at 14:20, and stamping the newest of
+    those across all of them put a timestamp on numbers it did not belong to.
     """
     def transform(data: dict) -> tuple[str, str, str]:
-        rows = data.get("data") if isinstance(data, dict) else None
-        latest = _rows_by_region_at_latest_interval(rows or [])
+        rows = [r for r in (data.get("data") if isinstance(data, dict) else None) or []
+                if isinstance(r, dict)]
+        latest = _rows_by_region_at_latest_interval(rows)
         if not latest:
             return (f"No MISO Data Exchange data is available for {title}.", "", doc_url)
 
+        by_region = _rows_by_region(rows)
+        # the document's freshness is its newest interval; each region still
+        # carries its own below, so this stamps nothing it does not cover
         as_of = max((when for when, _ in latest.values()), default="")
 
-        lines = [f"MISO {title} by region for the completed market day, from the "
-                 f"MISO Data Exchange API"
-                 + (f" (interval starting {as_of} EST)" if as_of else "")
-                 + ". This is a settled market day, not live output."]
+        day, nature = FRAMING.get(kind, FRAMING["settled"])
+        lines = [f"MISO {title} by region for {day}, from the MISO Data Exchange "
+                 f"API. {nature} Each region reports the day's high and low and "
+                 f"its own final interval; regions can end at different intervals."]
         known = ("MISO", "NORTH", "CENTRAL", "SOUTH", "NO_REGION")
         order = [r for r in known if r in latest] + sorted(set(latest) - set(known))
         for code in order:
-            _, rows_here = latest[code]
+            when, rows_here = latest[code]
             name = _REGION_NAMES.get(code, code)
-            described = []
-            for row in rows_here:
-                measures = _measures(row)
-                dimension = _dimension_label(row)
-                if dimension and measures:
-                    described.append(f"{dimension} ({measures})")
-                elif dimension:
-                    described.append(dimension)
-                elif measures:
-                    described.append(measures)
-            lines.append(f"- {name}: {'; '.join(described)}." if described
-                         else f"- {name}: no values reported.")
+            final = _describe_rows(rows_here)
+            clock = _clock(when)
+            ending = f" ending {clock} EST" if clock else ""
+            line = f"- {name}: {final}{ending}." if final else f"- {name}: no values reported."
+            day = _day_sentence(_day_range(by_region.get(code, [])))
+            if day:
+                line += f" Across the day, {day}."
+            lines.append(line)
         return "\n".join(lines), as_of, doc_url
     return transform

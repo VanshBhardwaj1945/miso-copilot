@@ -66,7 +66,7 @@ def answering(monkeypatch, retrieval):
 
 def test_the_answer_is_the_models_text(answering):
     answering(Response([Block("Wind is **1,500 MW**.")]))
-    answer, _ = claude.answer_question("how much wind?")
+    answer, _, _ = claude.answer_question("how much wind?")
     assert answer == "Wind is **1,500 MW**."
 
 
@@ -83,7 +83,7 @@ def test_sources_come_from_chroma_not_from_the_model(answering):
     link cannot reach the chips.
     """
     answering(Response([Block("some answer naming https://evil.example")]))
-    _, sources = claude.answer_question("q")
+    _, sources, _ = claude.answer_question("q")
     assert sources == SOURCES
 
 
@@ -108,7 +108,7 @@ def test_with_no_sources_the_answer_still_cites_miso(answering, retrieval):
     """Architecture rule 6: every doc-lane answer carries a link."""
     retrieval(sources=[])
     answering(Response([Block("ok")]))
-    _, sources = claude.answer_question("q")
+    _, sources, _ = claude.answer_question("q")
     assert sources and sources[0]["url"].startswith("https://www.misoenergy.org")
 
 
@@ -116,7 +116,7 @@ def test_with_no_sources_the_answer_still_cites_miso(answering, retrieval):
 
 def test_a_refusal_hands_off_to_miso_rather_than_answering(answering):
     answering(Response([Block("...")], stop_reason="refusal"))
-    answer, sources = claude.answer_question("something out of bounds")
+    answer, sources, _ = claude.answer_question("something out of bounds")
     assert "reach out to MISO" in answer
     assert sources[0]["url"].endswith("/contact-us/")
 
@@ -126,7 +126,7 @@ def test_a_truncated_answer_says_so(answering):
     that admits it stopped.
     """
     answering(Response([Block("a long table...")], stop_reason="max_tokens"))
-    answer, _ = claude.answer_question("q")
+    answer, _, _ = claude.answer_question("q")
     assert "cut short" in answer
 
 
@@ -134,7 +134,7 @@ def test_a_truncated_answer_says_so(answering):
 
 def test_without_a_client_the_retrieved_context_is_returned_verbatim(monkeypatch, retrieval):
     monkeypatch.setattr(claude, "client", None)
-    answer, sources = claude.answer_question("q")
+    answer, sources, _ = claude.answer_question("q")
     assert "Mock Mode" in answer
     assert "Wind is 1,500 MW as of 09:25 EST." in answer
     assert sources == SOURCES
@@ -143,7 +143,7 @@ def test_without_a_client_the_retrieved_context_is_returned_verbatim(monkeypatch
 def test_mock_mode_says_so_when_nothing_was_retrieved(monkeypatch, retrieval):
     monkeypatch.setattr(claude, "client", None)
     retrieval(context="", sources=[])
-    answer, sources = claude.answer_question("q")
+    answer, sources, _ = claude.answer_question("q")
     assert "No relevant documents" in answer
     assert sources[0]["url"].startswith("https://www.misoenergy.org")
 
@@ -151,7 +151,7 @@ def test_mock_mode_says_so_when_nothing_was_retrieved(monkeypatch, retrieval):
 def test_force_mock_short_circuits_even_with_a_client(monkeypatch, answering):
     fake = answering(Response([Block("should not be used")]))
     monkeypatch.setattr(claude, "FORCE_MOCK", True)
-    answer, _ = claude.answer_question("q")
+    answer, _, _ = claude.answer_question("q")
     assert "Mock Mode" in answer
     assert fake.calls == []
 

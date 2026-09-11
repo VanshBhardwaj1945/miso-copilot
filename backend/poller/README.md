@@ -4,11 +4,11 @@ Background poller for the API ingestion lane. It fetches MISO's live JSON
 endpoints on a schedule and writes them to disk **unmodified**. That is the
 whole job.
 
-Four endpoints or five, depending on configuration. The four legacy public
+Four endpoints or fifteen, depending on configuration. The four legacy public
 display feeds - FuelMix, RealTimeTotalLoad, Snapshot, WindSolar - are always
-polled. The MISO Data Exchange fuel-type feed joins them when `MISO_API_KEY`
-is set; with no key it registers nothing and the four carry on, which is a
-normal state rather than an error. `active_endpoints()` in `core.py` is that
+polled. The eleven region-scoped MISO Data Exchange feeds join them when
+`MISO_API_KEY` is set; with no key they register nothing and the four carry on,
+which is a normal state rather than an error. `active_endpoints()` in `core.py` is that
 decision, and it is the only place that makes it.
 
 The Data Exchange feed differs from the four in three ways: a different host,
@@ -82,18 +82,25 @@ link attempted less than 60 seconds ago is skipped for this cycle and logged.
 
 One lease covers one endpoint's whole cycle, not one request. For the four
 legacy feeds those are the same thing - a cycle is one request each. For the
-paged Data Exchange feed they are not: a cycle there is up to five requests to
-the same link, so the lease is claimed once for the endpoint and
+paged Data Exchange feeds they are not: a cycle there can be several requests
+to the same link, so the lease is claimed once for the endpoint and
 `DE_PAGE_PAUSE_SECONDS` in `core.py` paces the pages inside it. That pause is
 the guard's own 60 seconds, and for the same reason the guard's is: a shorter
 one would breach the published limit from inside the lease, where nothing else
 is watching.
 
-The page size is deliberately large, so one page is the normal case and no
-pause happens at all. The worst case is five pages (`DE_MAX_PAGES`), so four
-pauses - 240 s, inside the 300 s cadence. A cycle that did overrun is skipped
-rather than stacked, since the scheduled job is `coalesce=True,
-max_instances=1`. Worth knowing before running `--once` by hand against a
+`DE_PAGE_SIZE` is 1000 because that is what MISO serves: every stored payload
+echoes `"pageSize": 1000` whatever we ask for, so a larger number is one that
+is silently ignored. The busiest feed observed is 604 rows, so one page is the
+normal case and no pause happens at all.
+
+Those pauses are sequential and block every endpoint behind them, so they come
+out of `DE_PAGE_PAUSE_BUDGET_SECONDS`, a budget shared by the whole cycle
+rather than spent per endpoint. Twelve paged endpoints pausing freely would
+sleep 44 minutes against a 300 s cadence and the live display feeds would stop
+refreshing for all of it. An endpoint that exhausts the budget fails and
+retries next cycle. A cycle that does overrun is skipped rather than stacked,
+since the scheduled job is `coalesce=True, max_instances=1`. Worth knowing before running `--once` by hand against a
 multi-page day: it can sit for four minutes looking hung, and it is not.
 
 The lease file lives at `~/.cache/miso-copilot/rate-guard.json`, outside
@@ -163,7 +170,7 @@ JSON in front of an audience.
   header.
 - `MISO_DATA_EXCHANGE_BASE` - the Data Exchange host, default
   `https://apim.misoenergy.org`. Separate from `MISO_API_BASE` because the two
-  APIs are two hosts; point both at the stub to exercise all five links
+  APIs are two hosts; point both at the stub to exercise every link
   locally.
 
 All of these are read after `.env` loading, so they can be set in `.env`. One

@@ -31,8 +31,8 @@ backend/                    # FastAPI app (entry: uvicorn backend.main:app)
                             #   crosswalk.json = report->API mappings, build_crosswalk.py
                             #   drafts them with Claude and validates against the spec
   poller/                   #   5-min poller: verbatim JSON to data/raw/ - see README.
-                            #   Four legacy display feeds always; the MISO Data
-                            #   Exchange fuel-type feed too when MISO_API_KEY is set
+                            #   Four legacy display feeds always; eleven MISO Data
+                            #   Exchange feeds too when MISO_API_KEY is set
 app.py                      # Streamlit chat UI (testing/backup ONLY - never the demo;
                             #   independent of frontend/ by design, do not merge them)
 tests/                      # pytest suite for backend/poller/, plus the MISO stub
@@ -126,7 +126,8 @@ frontend/UI_RULES.md §11.
 The design is **pull-based RAG** - deliberate team decisions, not accidents:
 
 1. **No live MISO API calls at question time.** A background poller (APScheduler
-   inside FastAPI, every 5 min) fetches the four MISO endpoints and writes their
+   inside FastAPI, every 5 min) fetches the MISO endpoints - four display feeds,
+   plus eleven Data Exchange feeds when a key is set - and writes their
    JSON **verbatim** into `data/raw/`. The RAG lane reads those files and writes
    Chroma; question time only reads Chroma. This keeps the demo alive even if
    MISO's APIs go down. Answers may be about 10 min stale (the 5-min cadence plus
@@ -147,9 +148,10 @@ The design is **pull-based RAG** - deliberate team decisions, not accidents:
    `SentenceSplitter` chunks (~512 tokens, ~50 overlap) → embed → Chroma. Poller
    snapshots: the RAG lane builds a single small `Document` per endpoint from
    `data/raw/`, with a fixed `doc_id` and **no chunking**.
-   Query: one search per lane over the same collection - top-2 snapshots plus
-   top-4 document chunks, filtered by `doc_type` - so document chunks can never
-   crowd the live numbers out of a question.
+   Query: one search per lane over the same collection, filtered by `doc_type` -
+   top-3 live snapshots, top-3 settled Data Exchange market days and top-4
+   document chunks - so neither the document chunks nor yesterday's settled
+   market day can crowd the live numbers out of a question.
 8. **Embeddings are local** (sentence-transformers all-MiniLM-L6-v2). LLM is Claude
    via the Anthropic API with a single tool, `search_docs(query)`.
 9. **Out-of-scope questions get a graceful handoff** to MISO's contact form - never

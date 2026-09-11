@@ -58,19 +58,31 @@ STALE_TMP_SECONDS = 600
 PUBLIC = "public"
 DATA_EXCHANGE = "data_exchange"
 
-# Data Exchange responses are paged. Ask for a page large enough that one
-# request almost always suffices - MISO allows ~1 request per endpoint per
-# minute, and a paged fetch is several requests to the same link.
-DE_PAGE_SIZE = 5000
+# Data Exchange responses are paged. 1000 is not a preference, it is the
+# ceiling: every stored payload echoes "pageSize": 1000 no matter what we ask
+# for, so a larger number here is a number that is silently ignored and any
+# arithmetic resting on it is wrong. The busiest feed observed is 604 rows, so
+# one page is still the normal case.
+DE_PAGE_SIZE = 1000
 # Hard stop, so a server that never sets lastPage cannot loop or fill the disk.
 DE_MAX_PAGES = 5
 # One guard lease covers the endpoint, not each page, so this pause is the only
 # thing holding a paged fetch to MISO's limit - hence the guard's own interval
-# rather than something smaller. _fetch_all_pages has the arithmetic.
+# rather than something smaller.
 DE_PAGE_PAUSE_SECONDS = guard.MIN_SECONDS_BETWEEN
+# Paging pauses are sequential and block the whole cycle. With one paged
+# endpoint the worst case was four pauses; with twelve it is 44 minutes against
+# a 300 s cadence, and the live display feeds - the demo's actual product -
+# would stop refreshing for all of it. So the pauses are budgeted per cycle
+# rather than per endpoint: an endpoint that runs out fails loudly and retries
+# next cycle, and nothing is ever stored half-fetched.
+DE_PAGE_PAUSE_BUDGET_SECONDS = 120
 # Data Exchange publishes a completed market day at 2am EST the day after, so
 # "today" is always a 400. See market_date().
 DE_PUBLISH_HOUR_EST = 2
+# MISO's "2am" is not to the second. Without a margin, a publish that slips by
+# a minute makes every cycle in that window take a 400 and look like an outage.
+DE_PUBLISH_GRACE_MINUTES = 15
 
 DEFAULT_POLL_SECONDS = 300
 MIN_POLL_SECONDS = 5
@@ -214,8 +226,18 @@ def market_date(now: datetime | None = None) -> str:
     year, so a DST-aware zone would roll the date an hour early or late for
     part of the year. Same reasoning as the "as of" stamp in routes/ask.py.
     """
-    est = (now or datetime.now(ZoneInfo("EST"))).astimezone(ZoneInfo("EST"))
-    back = 1 if est.hour >= DE_PUBLISH_HOUR_EST else 2
+    est = now or datetime.now(ZoneInfo("EST"))
+    if est.tzinfo is None:
+        # astimezone reads a naive value as the *host's* local time, so the
+        # same call would return different days on different machines - and
+        # the error lands exactly on the 2am boundary this function exists to
+        # get right. A naive argument means EST, like every other time here.
+        est = est.replace(tzinfo=ZoneInfo("EST"))
+    est = est.astimezone(ZoneInfo("EST"))
+    published = est.replace(hour=DE_PUBLISH_HOUR_EST,
+                            minute=DE_PUBLISH_GRACE_MINUTES,
+                            second=0, microsecond=0)
+    back = 1 if est >= published else 2
     return (est - timedelta(days=back)).strftime("%Y-%m-%d")
 
 
@@ -600,6 +622,31 @@ def _fetch(endpoint: Endpoint, url: str) -> dict:
     return _validate(endpoint, content, status, size)
 
 
+class PagePauseBudget:
+    """How much of one cycle may be spent waiting between pages.
+
+    Shared across every endpoint in the cycle, because the pauses are
+    sequential: what matters to the live feeds is the total, not any one
+    endpoint's share of it.
+    """
+
+    def __init__(self, seconds: float = DE_PAGE_PAUSE_BUDGET_SECONDS):
+        self.remaining = seconds
+
+    def spend(self, seconds: float) -> bool:
+        """Wait between pages if the cycle can still afford to.
+
+        False means it cannot, and the caller must fail rather than fetch the
+        next page early - the pause is what holds us to MISO's rate limit, and
+        the penalty for breaching it is an IP ban we cannot undo.
+        """
+        if seconds > self.remaining:
+            return False
+        self.remaining -= seconds
+        time.sleep(seconds)
+        return True
+
+
 def _page_url(url: str, page_number: int) -> str:
     """The same link with paging parameters. Kept as one place so the guard key
     (page 1's URL) and every follow-up differ only in the query string."""
@@ -607,7 +654,8 @@ def _page_url(url: str, page_number: int) -> str:
     return f"{url}{joiner}pageNumber={page_number}&pageSize={DE_PAGE_SIZE}"
 
 
-def _fetch_all_pages(endpoint: Endpoint, url: str) -> dict:
+def _fetch_all_pages(endpoint: Endpoint, url: str,
+                     budget: "PagePauseBudget | None" = None) -> dict:
     """Fetch a paged endpoint and return one assembled payload.
 
     Stops at page.lastPage, or DE_MAX_PAGES - a server that never sets
@@ -621,23 +669,24 @@ def _fetch_all_pages(endpoint: Endpoint, url: str) -> dict:
     MIN_SECONDS_BETWEEN - a shorter pause would breach the very rule the guard
     exists to keep, and the penalty is an IP ban we cannot undo.
 
-    The arithmetic works out. DE_PAGE_SIZE is large enough that one page is the
-    normal case, which pauses not at all; the worst case is DE_MAX_PAGES (5)
-    pages, so four pauses, 240 s, inside the 300 s cadence. And an overrun is
-    survivable anyway: the scheduled job is coalesce=True, max_instances=1, so
-    a cycle that runs long delays the next one instead of stacking on it.
+    Those pauses are sequential and block every endpoint behind this one, so
+    they come out of a budget shared by the whole cycle rather than being
+    spent freely per endpoint. One page is the normal case and costs nothing;
+    an endpoint that exhausts the budget fails and retries next cycle, which
+    keeps the live display feeds refreshing on time.
 
     A truncated fetch is recorded as a failure rather than passed off as
     complete - that includes a response whose paging metadata is missing,
     which is malformed rather than finished.
     """
+    budget = budget or PagePauseBudget()
     rows: list = []
     page_meta: dict = {}
     for page_number in range(1, DE_MAX_PAGES + 1):
-        if page_number > 1:
-            # the one thing standing between a multi-page cycle and several
-            # back-to-back requests at a link limited to one per minute
-            time.sleep(DE_PAGE_PAUSE_SECONDS)
+        # this pause is the one thing standing between a multi-page cycle and
+        # several back-to-back requests at a link limited to one per minute
+        if page_number > 1 and not budget.spend(DE_PAGE_PAUSE_SECONDS):
+            return _fetch_failure("page pause budget spent for this cycle")
         result = _fetch(endpoint, _page_url(url, page_number))
         if not result["ok"]:
             return result
@@ -676,7 +725,8 @@ def _internal_error_observation() -> dict:
 
 
 def _poll_endpoint(endpoint: Endpoint, url: str, directory: Path,
-                   bypass_guard: bool) -> dict:
+                   bypass_guard: bool,
+                   budget: "PagePauseBudget | None" = None) -> dict:
     """Claim, fetch, validate and write one endpoint. Returns this cycle's observation.
 
     Never reads the stored status: the observation is merged onto it later,
@@ -687,7 +737,8 @@ def _poll_endpoint(endpoint: Endpoint, url: str, directory: Path,
     if not bypass_guard and not guard.claim(url):
         return _skipped_observation()
 
-    result = _fetch_all_pages(endpoint, url) if endpoint.paged else _fetch(endpoint, url)
+    result = (_fetch_all_pages(endpoint, url, budget) if endpoint.paged
+              else _fetch(endpoint, url))
     observed = {
         "outcome": "failed",
         "last_attempt": now().isoformat(),
@@ -750,7 +801,14 @@ def _prune_payloads(directory: Path, previous_endpoints: dict,
     # casefolded: macOS and Windows filesystems are case-insensitive, so
     # "Windsolar" and "WindSolar" (or "_STATUS") name the same file on disk
     status_key = status_path(directory).stem.casefold()
+    # every endpoint the code knows about, not just the ones polled this cycle.
+    # A missing key makes eleven Data Exchange endpoints inactive without
+    # removing them from the table, and deleting their payloads would strand
+    # the documents already in Chroma - present, unrefreshable, with no source
+    # on disk. Only an endpoint gone from the code has truly left.
     live = {k.casefold() for k in current}
+    live |= {e.key.casefold() for e in ENDPOINTS}
+    live |= {e.key.casefold() for e in DATA_EXCHANGE_ENDPOINTS}
     for key in previous_endpoints:
         if isinstance(key, str) and key.casefold() in live:
             continue
@@ -850,12 +908,15 @@ def poll_once() -> dict:
     # all network requests happen here, with no lock held and the status file
     # not yet read (reading it first is how two cycles once merged onto stale entries)
     observations = {}
+    # one budget for the whole cycle: the paging pauses are sequential, so the
+    # live feeds care about the total wait, not any one endpoint's share
+    budget = PagePauseBudget()
     for endpoint in active_endpoints():
         key = endpoint.key
         try:
             observations[key] = _poll_endpoint(
                 endpoint, endpoint_url(endpoint, endpoint_base(endpoint, base)),
-                directory, bypass_guard)
+                directory, bypass_guard, budget)
         except Exception:
             # _fetch names every failure it can foresee; this is a bug in our code
             log.exception("%s: unexpected failure", key)

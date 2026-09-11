@@ -1,11 +1,12 @@
 """LlamaIndex retriever backing the search_docs step of every answer.
 
 Three lanes share one Chroma collection: four live snapshots, eleven settled
-Data Exchange market days, and a few dozen reference-document chunks. Searched together, a wordy question about
-"grid conditions" fills the top-k with Fact Sheet chunks and the live numbers
-never reach Claude. So each lane is searched on its own and both results are
-handed over, snapshots first - every lane keeps a seat at the table and Claude
-decides what the question actually needs.
+Data Exchange market days, and a few hundred reference-document chunks.
+Searched together, a wordy question about "grid conditions" fills the top-k
+with Fact Sheet chunks and the live numbers never reach Claude. So each lane
+is searched on its own and the results are handed over, snapshots first -
+every lane keeps a seat at the table and Claude decides what the question
+actually needs.
 """
 
 from llama_index.core.vector_stores import (
@@ -23,8 +24,14 @@ from backend.rag.store import get_index
 # yesterday's time, while the live feed that knew the answer was cut. Widening
 # the shared budget only admits more of the block; separating the lanes is what
 # guarantees the live feeds a seat.
-LIVE_TOP_K = 2      # four display feeds: what is happening now
-SETTLED_TOP_K = 2   # eleven Data Exchange feeds: a completed market day, by region
+# The two snapshot budgets are sized against measured recall, not intuition.
+# Two live seats cut the fuel mix from "what share of load is wind serving
+# right now", which needs three of the four feeds at once; the whole live
+# corpus is four short paragraphs, so a third seat costs almost nothing. Two
+# settled seats put the day-ahead fuel mix at rank 3 behind its real-time
+# twin, which reads nearly identically to an embedding; a third recovers it.
+LIVE_TOP_K = 3      # four display feeds: what is happening now
+SETTLED_TOP_K = 3   # eleven Data Exchange feeds: a completed market day, by region
 DOC_TOP_K = 4       # the 512-token chunks, same budget as before the doc lane
 
 

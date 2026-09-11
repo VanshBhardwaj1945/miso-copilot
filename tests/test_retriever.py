@@ -1,4 +1,4 @@
-"""search_docs: two lanes, one seat each, and the citations that come out.
+"""search_docs: three lanes, each with its own budget, and the citations.
 
 The lane split exists because of a real failure - one shared top-k let Fact
 Sheet chunks crowd the live numbers out of "what are grid conditions?". These
@@ -74,9 +74,22 @@ def test_each_lane_is_searched_separately_with_its_own_budget(index):
     fake = index({"live_snapshot": [LIVE], "settled_market_day": [SETTLED],
                   "reference_doc": [DOC]})
     retriever.search_docs("grid conditions")
-    assert fake.asked == {"live_snapshot": retriever.LIVE_TOP_K,
-                          "settled_market_day": retriever.SETTLED_TOP_K,
-                          "reference_doc": retriever.DOC_TOP_K}
+    # literals, not the constants: asserting a constant against itself passes
+    # for any value it is given, so widening a budget back into the crowding
+    # bug would not fail here
+    assert fake.asked == {"live_snapshot": 3, "settled_market_day": 3,
+                          "reference_doc": 4}
+
+
+def test_the_live_lane_can_seat_a_whole_grid_question(index):
+    """"What share of load is wind serving right now" needs the wind feed, the
+    load feed and the fuel mix at once. Two seats cut one of the three, and
+    the entire live corpus is four short paragraphs."""
+    live = [Node(f"live {i}", "live_snapshot", f"L{i}", f"https://l/{i}",
+                 endpoint=f"L{i}", as_of="09:25 EST") for i in range(4)]
+    index({"live_snapshot": live, "settled_market_day": [], "reference_doc": []})
+    context, _, _ = retriever.search_docs("what share of load is wind serving right now")
+    assert context.count("live ") >= 3
 
 
 def test_a_settled_market_day_cannot_crowd_out_the_live_feeds(index):

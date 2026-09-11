@@ -49,7 +49,8 @@ def answering(monkeypatch):
     monkeypatch.setattr(claude, "client", object())
     monkeypatch.setattr(claude, "answer_question",
                         lambda q: ("**Wind** is 1,500 MW.",
-                                   [{"title": "MISO", "url": "https://www.misoenergy.org/"}]))
+                                   [{"title": "MISO", "url": "https://www.misoenergy.org/"}],
+                                   None))
 
 
 def raises(exc):
@@ -82,6 +83,27 @@ def test_the_as_of_stamp_is_fixed_est(client, answering):
     """
     as_of = client.post("/ask", json={"question": "q"}).json()["as_of"]
     assert as_of.endswith(" EST")
+
+
+def test_the_answer_carries_misos_own_stamp_when_live_data_reached_it(client, monkeypatch):
+    """The retriever works out the "as of" from the live feeds that actually
+    answered. This route computed its own from the wall clock and dropped that
+    value on the floor, so an answer read off yesterday's settled market day
+    was stamped with the current time - the freshness claim was never true,
+    only never checked."""
+    monkeypatch.setattr(claude, "client", object())
+    monkeypatch.setattr(claude, "answer_question",
+                        lambda q: ("a", [], "10-Sep-2026 - Interval 18:55 EST"))
+    assert client.post("/ask", json={"question": "q"}).json()["as_of"] == \
+        "10-Sep-2026 - Interval 18:55 EST"
+
+
+def test_an_answer_with_no_live_data_falls_back_to_the_clock(client, monkeypatch):
+    """A question answered entirely from reference documents has no MISO stamp
+    to carry, and a blank "as of" reads worse than the time of the reply."""
+    monkeypatch.setattr(claude, "client", object())
+    monkeypatch.setattr(claude, "answer_question", lambda q: ("a", [], None))
+    assert client.post("/ask", json={"question": "q"}).json()["as_of"].endswith(" EST")
 
 
 def test_a_successful_question_is_logged_as_answered(client, answering, tmp_path):
@@ -166,7 +188,7 @@ def test_the_limiter_returns_429_and_stops_calling_claude(client, monkeypatch):
     calls = []
     monkeypatch.setattr(claude, "client", object())
     monkeypatch.setattr(claude, "answer_question",
-                        lambda q: (calls.append(q), ("a", []))[1])
+                        lambda q: (calls.append(q), ("a", [], None))[1])
     for _ in range(security.MAX_PER_MINUTE):
         assert client.post("/ask", json={"question": "q"}).status_code == 200
     blocked = client.post("/ask", json={"question": "q"})
@@ -176,7 +198,7 @@ def test_the_limiter_returns_429_and_stops_calling_claude(client, monkeypatch):
 
 def test_a_rate_limited_request_is_logged(client, monkeypatch):
     monkeypatch.setattr(claude, "client", object())
-    monkeypatch.setattr(claude, "answer_question", lambda q: ("a", []))
+    monkeypatch.setattr(claude, "answer_question", lambda q: ("a", [], None))
     for _ in range(security.MAX_PER_MINUTE + 1):
         client.post("/ask", json={"question": "q"})
     outcomes = [json.loads(line)["outcome"]

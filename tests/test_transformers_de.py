@@ -4,8 +4,9 @@ The four legacy transformers have no tests, which is how two bugs in this one
 survived review: the newest row was picked by array position rather than by
 timestamp, and any region MISO adds later was silently dropped.
 
-Outside the coverage gate (pytest.ini measures backend.poller only), so these
-earn their place by protecting behavior, not a number.
+These earn their place by protecting behavior, not a coverage number: the
+suite measures all of backend, and a line can be covered by a test that would
+not notice it changing.
 """
 
 import pytest
@@ -157,20 +158,61 @@ def de_row(region, when="2026-09-09T23:00:00", **values):
             "region": region, **values}
 
 
-def test_one_transformer_serves_every_value_shape():
+# Every entry in _MEASURES, with the exact phrase it must produce. Table-driven
+# and exhaustive on purpose: five of the twelve had no assertion at all, and
+# mutating "fixed" to a unitless count, or "virtual" to "wind", changed what a
+# document claimed MISO published without failing a single test.
+MEASURE_CASES = [
+    ({"load": 17615.0}, "load 17,615 MW"),
+    ({"nsi": -2088.0}, "net scheduled interchange -2,088 MW"),
+    ({"supply": 3421.0}, "cleared supply 3,421 MW"),
+    ({"fixed": 37271.8}, "fixed demand 37,272 MW"),
+    ({"priceSens": 450.5}, "price-sensitive demand 450 MW"),
+    ({"virtual": 1200.0}, "virtual demand 1,200 MW"),
+    ({"mustRun": 10.0}, "must-run 10 MW"),
+    ({"economic": 25128.9}, "economic 25,129 MW"),
+    ({"emergency": 3610.8}, "emergency 3,611 MW"),
+    ({"loadForecast": 500.0}, "load forecast 500 MW"),
+    ({"totalMw": 26858.0}, "total 26,858 MW"),
+    ({"unitCount": 2}, "units 2"),
+]
+
+
+def test_every_measure_is_covered_by_a_case():
+    """So adding a field to _MEASURES without saying how it reads fails here."""
+    from backend.rag.transformers import _MEASURES
+    assert {k for values, _ in MEASURE_CASES for k in values} == set(_MEASURES)
+
+
+@pytest.mark.parametrize("values,expected", MEASURE_CASES)
+def test_one_transformer_serves_every_value_shape(values, expected):
     """The eleven endpoints differ in their fields - load, nsi, supply,
     mustRun - which is why they share a generic transformer instead of eleven
-    near-identical ones."""
-    for values, expected in (
-        ({"load": 17615.0}, "load 17,615 MW"),
-        ({"nsi": -2088.0}, "net scheduled interchange -2,088 MW"),
-        ({"supply": 3421.0}, "cleared supply 3,421 MW"),
-        ({"mustRun": 10.0, "economic": 20.0}, "must-run 10 MW"),
-        ({"loadForecast": 500.0}, "load forecast 500 MW"),
-    ):
-        fn = make_de_transformer("thing", URL)
-        prose, _, _ = fn({"data": [de_row("NORTH", **values)]})
-        assert expected in prose, values
+    near-identical ones.
+
+    Asserted as equality, not `in`: "total 26,858 MW" is a substring of
+    "grand total 26,858 MW", so a relabeled measure passed a containment check.
+    """
+    assert _measures(de_row("NORTH", **values)) == expected
+
+
+def test_a_measure_reaches_the_prose_it_is_rendered_for():
+    """The table above tests the phrase; this tests that it is actually used."""
+    fn = make_de_transformer("thing", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=17615.0)]})
+    assert "MISO North: load 17,615 MW" in prose
+
+
+def test_a_null_measure_is_omitted_rather_than_printed_as_zero():
+    """7 of 96 rows in a real day-ahead demand payload carry null priceSens.
+    "price-sensitive demand 0 MW" is a number MISO never published."""
+    assert _measures({"load": 100.0, "priceSens": None}) == "load 100 MW"
+
+
+def test_a_boolean_in_a_measure_field_is_not_a_quantity():
+    """The peak flag is caught by _IGNORED, so that guard alone proves nothing
+    about a boolean arriving where a number belongs. True would read "1 MW"."""
+    assert _measures({"load": True}) == ""
 
 
 def test_a_nested_fuel_breakdown_is_flattened():
@@ -290,3 +332,114 @@ def test_the_title_names_the_endpoint():
     fn = make_de_transformer("day-ahead net scheduled interchange", URL)
     prose, _, _ = fn({"data": [de_row("NORTH", nsi=1.0)]})
     assert "day-ahead net scheduled interchange" in prose
+
+
+# --- the day, not just the last interval ---------------------------------
+
+def test_the_days_peak_is_reported_not_only_the_final_interval():
+    """Found in review: "what was MISO Central's load yesterday?" answered
+    41,040 MW, the 23:00 trough, while the day peaked at 54,527 MW at 16:00.
+    The peak was in the payload and in no document."""
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [
+        de_row("CENTRAL", when="2026-09-09T16:00:00", load=54527.0),
+        de_row("CENTRAL", when="2026-09-09T03:00:00", load=37056.0),
+        de_row("CENTRAL", when="2026-09-09T23:00:00", load=41040.0),
+    ]})
+    assert "load 41,040 MW ending 23:00 EST" in prose        # the end state
+    assert "peaked at 54,527 MW (16:00 EST)" in prose        # and the day
+    assert "bottomed at 37,056 MW (03:00 EST)" in prose
+
+
+def test_a_dimensional_feeds_day_range_sums_the_interval():
+    """A region's number for an interval is the total across its rows - the
+    load forecast splits one region over ten zones - not whichever row is
+    first."""
+    fn = make_de_transformer("medium-term load forecast", URL)
+    prose, _, _ = fn({"data": [
+        de_row("NORTH", when="2026-09-09T10:00:00", localResourceZone="Z1", loadForecast=100.0),
+        de_row("NORTH", when="2026-09-09T10:00:00", localResourceZone="Z2", loadForecast=200.0),
+        de_row("NORTH", when="2026-09-09T11:00:00", localResourceZone="Z1", loadForecast=50.0),
+        de_row("NORTH", when="2026-09-09T11:00:00", localResourceZone="Z2", loadForecast=60.0),
+    ]})
+    assert "peaked at 300 MW (10:00 EST)" in prose
+    assert "bottomed at 110 MW (11:00 EST)" in prose
+
+
+def test_a_flat_measure_is_not_reported_as_a_range():
+    """"peaked at 1 and bottomed at 1" is noise, not information."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, _, _ = fn({"data": [
+        de_row("NORTH", when="2026-09-09T08:00:00", fuelType="Hydro", unitCount=1),
+        de_row("NORTH", when="2026-09-09T09:00:00", fuelType="Hydro", unitCount=1),
+    ]})
+    assert "peaked" not in prose
+
+
+def test_one_interval_is_not_reported_as_a_range():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
+    assert "Across the day" not in prose
+
+
+def test_each_region_is_stamped_with_its_own_final_interval():
+    """Found in review: regions do not end together. On a real fuel-on-the-
+    margin payload CENTRAL ended at 23:55 and NO_REGION at 14:20, and one
+    header timestamp was printed over both - 9h35m wrong for the second."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, as_of, _ = fn({"data": [
+        de_row("CENTRAL", when="2026-09-09T23:55:00", fuelType="Coal", unitCount=1),
+        de_row("NO_REGION", when="2026-09-09T14:20:00", fuelType="Hydro", unitCount=1),
+    ]})
+    assert "MISO Central: Coal (units 1) ending 23:55 EST" in prose
+    assert "unassigned to a region: Hydro (units 1) ending 14:20 EST" in prose
+    # the document's own freshness is still its newest interval
+    assert as_of == "2026-09-09T23:55:00"
+
+
+def test_the_header_does_not_stamp_a_single_time_over_every_region():
+    """What the per-region stamp replaced."""
+    fn = make_de_transformer("fuel on the margin", URL)
+    prose, _, _ = fn({"data": [
+        de_row("CENTRAL", when="2026-09-09T23:55:00", unitCount=1),
+        de_row("SOUTH", when="2026-09-09T14:20:00", unitCount=1),
+    ]})
+    header = prose.splitlines()[0]
+    assert "23:55" not in header
+
+
+# --- a forecast is not a settlement --------------------------------------
+
+def test_a_forecast_feed_does_not_call_itself_a_settled_market_day():
+    """DELoadForecast is the one forward-looking feed. Telling the reader it
+    is "a settled market day, not live output" says the opposite of the truth
+    about the only data in the set that has not happened yet."""
+    fn = make_de_transformer("medium-term load forecast", URL, "forecast")
+    prose, _, _ = fn({"data": [de_row("NORTH", loadForecast=500.0)]})
+    assert "forecast MISO published in advance" in prose
+    assert "settled market day" not in prose
+    assert "completed market day" not in prose
+
+
+def test_a_settled_feed_still_says_it_is_settled():
+    fn = make_de_transformer("actual load", URL)
+    prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
+    assert "settled market day, not live output" in prose
+
+
+def test_an_unknown_kind_is_described_as_settled_rather_than_crashing():
+    fn = make_de_transformer("actual load", URL, "something-new")
+    prose, _, _ = fn({"data": [de_row("NORTH", load=100.0)]})
+    assert "completed market day" in prose
+
+
+# --- row time ------------------------------------------------------------
+
+def test_an_hour_number_is_not_mistaken_for_a_timestamp():
+    """timeInterval.value is "1".."24" on the hourly feeds. Sorted as text,
+    "9" beats "24", so a payload without `start` would pick hour 9 as newest -
+    the same misreading that once made the as-of stamp literally "24"."""
+    from backend.rag.transformers import _row_time
+    assert _row_time({"timeInterval": {"value": "24"}}) == ""
+    assert _row_time({"timeInterval": {"value": "2026-09-09T23:00:00"}}) == \
+        "2026-09-09T23:00:00"

@@ -149,11 +149,104 @@ def test_the_publish_boundary_is_two_am_est(hour, expected):
 
 
 def test_a_clock_in_another_zone_is_converted_not_assumed():
-    """01:30 UTC is still the previous evening in EST."""
+    """06:00 UTC is 01:00 EST - before the publish hour, so two days back.
+
+    The hour matters. This test used to pass 01:30 UTC, which lands in the
+    five-hour band where the converted and unconverted answers coincide: it
+    went green with the conversion deleted. Only 02:00-06:59 UTC tells the
+    two apart.
+    """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    when = datetime(2026, 9, 10, 1, 30, tzinfo=ZoneInfo("UTC"))
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=ZoneInfo("UTC"))
     assert core.market_date(when) == "2026-09-08"
+
+
+def test_a_naive_clock_is_read_as_est_not_as_the_machines_local_time():
+    """astimezone reads a naive value as the host's zone, so the same call
+    returned different days on a laptop in EDT and a server in UTC - and the
+    difference lands exactly on the 2am boundary this function exists for."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    naive = datetime(2026, 9, 10, 3, 0)
+    aware = datetime(2026, 9, 10, 3, 0, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(naive) == core.market_date(aware) == "2026-09-09"
+
+
+@pytest.mark.parametrize("hour,minute,expected", [
+    (2, 0, "2026-09-08"),      # 2am sharp: MISO may not have finished
+    (2, 14, "2026-09-08"),
+    (2, 15, "2026-09-09"),     # past the grace margin, yesterday is available
+    (2, 16, "2026-09-09"),
+])
+def test_the_publish_hour_carries_a_grace_margin(hour, minute, expected):
+    """MISO's "2am" is not to the second. Without a margin a publish that
+    slips by a minute made every cycle in that window take a 400, which reads
+    as an outage rather than as being early."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    when = datetime(2026, 9, 10, hour, minute, tzinfo=ZoneInfo("EST"))
+    assert core.market_date(when) == expected
+
+
+def test_the_registered_endpoints_are_pinned_by_name():
+    """Deleting a feed is a test failure, not a quieter cycle.
+
+    Every other assertion about this table iterates it, so it is vacuously
+    true over a shorter list: ten of the eleven could be removed - reverting
+    the feature - with the whole suite still green.
+    """
+    assert {e.key for e in core.DATA_EXCHANGE_ENDPOINTS} == {
+        "DEFuelMix", "DEActualLoad", "DEFuelOnMargin", "DEDayAheadDemand",
+        "DEDayAheadFuelMix", "DEClearedPhysical", "DEClearedVirtual",
+        "DEOfferedEcoMax", "DEOfferedEcoMin", "DENetScheduled", "DELoadForecast",
+    }
+
+
+# --- the paging pause budget ---------------------------------------------
+
+def test_a_pause_is_taken_from_the_cycles_budget(monkeypatch):
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    budget = core.PagePauseBudget(100)
+    assert budget.spend(60) is True
+    assert budget.remaining == 40
+    assert slept == [60]
+
+
+def test_a_cycle_stops_pausing_once_its_budget_is_spent(monkeypatch):
+    """The pauses are sequential and block every endpoint behind them. Twelve
+    paged endpoints pausing freely would sleep 44 minutes against a 300-second
+    cadence, and the live display feeds - the product - would stop refreshing
+    for all of it."""
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    budget = core.PagePauseBudget(60)
+    assert budget.spend(60) is True
+    assert budget.spend(60) is False     # and does not sleep anyway
+    assert slept == [60]
+
+
+def test_an_endpoint_that_runs_out_of_budget_fails_rather_than_hurrying(monkeypatch):
+    """Fetching the next page early would breach the rate limit the pause
+    exists to keep, and the penalty is an IP ban we cannot undo. A loud
+    failure retries next cycle; a hurried fetch cannot be undone."""
+    calls = []
+
+    def fake_fetch(endpoint, url):
+        calls.append(url)
+        body = {"data": [{"region": "NORTH"}],
+                "page": {"lastPage": False, "pageNumber": len(calls)}}
+        return {"ok": True, "content": json.dumps(body).encode(),
+                "status": 200, "bytes": 1, "error": None}
+
+    monkeypatch.setattr(core, "_fetch", fake_fetch)
+    monkeypatch.setattr(core, "DE_PAGE_PAUSE_SECONDS", 60)
+    endpoint = core.DATA_EXCHANGE_ENDPOINTS[0]
+    result = core._fetch_all_pages(endpoint, "https://x/y", core.PagePauseBudget(0))
+    assert result["ok"] is False
+    assert "budget" in result["error"]
+    assert len(calls) == 1               # page two was never requested
 
 
 def test_a_path_without_a_date_is_left_alone():

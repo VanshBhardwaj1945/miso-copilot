@@ -33,7 +33,7 @@ def ask(req: AskRequest, request: Request):
     started = time.perf_counter()
     outcome = "failed"
     try:
-        answer, sources = claude.answer_question(req.question)
+        answer, sources, data_as_of = claude.answer_question(req.question)
         outcome = "answered"
     except anthropic.AuthenticationError:
         raise HTTPException(503, "Claude API key is invalid")
@@ -47,10 +47,15 @@ def ask(req: AskRequest, request: Request):
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         security.log_request(ip, req.question, outcome, elapsed_ms)
 
-    # fixed EST, not America/New_York: MISO stamps everything in EST year-round
+    # MISO's own stamp on the live data that reached Claude, when live data
+    # did. The wall clock is only a fallback, for an answer read entirely off
+    # reference documents - using it unconditionally told the reader that an
+    # answer taken from yesterday's settled market day was current.
+    #
+    # Fixed EST, not America/New_York: MISO stamps everything in EST year-round
     # (its Snapshot feed said "5:25 PM EST" at 22:27 UTC in September), so a
     # DST-aware zone would read an hour off MISO's own displays all summer
-    as_of = datetime.now(ZoneInfo("EST")).strftime("%-I:%M %p EST")
+    as_of = data_as_of or datetime.now(ZoneInfo("EST")).strftime("%-I:%M %p EST")
     return {"answer": answer, "sources": sources, "as_of": as_of}
 
 

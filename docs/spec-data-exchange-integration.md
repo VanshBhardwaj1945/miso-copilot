@@ -90,10 +90,15 @@ Data Exchange path has real hours behind it.
 
 ### 4. Storage: **one document per endpoint - identical to the current poller**
 
-No new lane, no change to `LIVE_TOP_K`, no change to `retriever.py`. The new
-endpoint is fetched, transformed and upserted exactly the way `FuelMix` is
-today: one raw JSON file, one prose document, one fixed `doc_id`, overwritten
-each cycle. Architecture rule 3, read literally.
+One raw JSON file, one prose document, one fixed `doc_id`, overwritten each
+cycle, exactly the way `FuelMix` is. Architecture rule 3, read literally.
+
+**Superseded in part.** This section originally read "no new lane, no change to
+`LIVE_TOP_K`, no change to `retriever.py`". That did not survive contact with
+eleven feeds: they share an opening sentence, embed as a near-duplicate block,
+and took every seat on "what is MISO's total generation right now", answering
+from yesterday while the live feed was cut. A `settled_market_day` lane with
+its own budget is what fixed it. The storage rule above is unchanged.
 
 This was considered against splitting into one document per region, which would
 embed each region more sharply. **Deliberately rejected as out of scope** -

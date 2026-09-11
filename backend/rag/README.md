@@ -64,8 +64,9 @@ Chroma + LlamaIndex retrieval layer. Two feeds go in, one search comes out.
   the footprint total and must not be added to the three, because that
   double-count is the easy mistake for a reader and for the model.
 - `retriever.py` - `search_docs(query)`: searches each lane separately -
-  top-2 live snapshots and top-4 document chunks, by `doc_type` filter - and
-  hands both to Claude, snapshots first. One shared top-k let Fact Sheet
+  top-3 live snapshots, top-3 settled Data Exchange market days and top-4
+  document chunks, by `doc_type` filter - and hands all three to Claude,
+  live snapshots first. One shared top-k let Fact Sheet
   chunks crowd the live numbers out of "what are grid conditions?" questions;
   a seat per lane is the fix. Returns context + source links + freshest "as of".
 

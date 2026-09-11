@@ -14,10 +14,17 @@ client = anthropic.Anthropic(api_key=CLAUDE_API_KEY) if CLAUDE_API_KEY else None
 # True returns the retrieved context verbatim, no Claude call - handy for testing retrieval
 FORCE_MOCK = False
 
-def answer_question(question: str) -> tuple[str, list[dict]]:
-    """Retrieve context from Chroma and answer via Claude (or Mock Mode)."""
+def answer_question(question: str) -> tuple[str, list[dict], str | None]:
+    """Retrieve context from Chroma and answer via Claude (or Mock Mode).
+
+    Returns: (answer, sources, as_of) - as_of being MISO's own stamp on the
+    live data that reached Claude, or None when none did. It is carried out of
+    here rather than dropped because the caller was left computing the "as of"
+    from its own wall clock, which stamped every answer with the current time
+    including the ones read off a document from yesterday.
+    """
     # retrieve real MISO context from Chroma
-    context, sources, _ = search_docs(question)
+    context, sources, as_of = search_docs(question)
 
     # Mock Mode: return the retrieved vector DB context directly
     if FORCE_MOCK or not client:
@@ -28,7 +35,7 @@ def answer_question(question: str) -> tuple[str, list[dict]]:
         )
         if not sources:
             sources = [{"title": "misoenergy.org", "url": MISO_HOME_URL}]
-        return mock_answer, sources
+        return mock_answer, sources, as_of
 
     # Live Mode: prompt Claude with the retrieved context
     user_content = (
@@ -52,6 +59,7 @@ def answer_question(question: str) -> tuple[str, list[dict]]:
             "I can't help with that question. For assistance, please reach "
             "out to MISO directly.",
             [{"title": "MISO Contact Form", "url": CONTACT_URL}],
+            as_of,
         )
 
     answer = "".join(b.text for b in response.content if b.type == "text")
@@ -60,4 +68,4 @@ def answer_question(question: str) -> tuple[str, list[dict]]:
     if not sources:
         sources = [{"title": "misoenergy.org", "url": MISO_HOME_URL}]
 
-    return answer, sources
+    return answer, sources, as_of

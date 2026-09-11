@@ -2,13 +2,13 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable
 
 from llama_index.core.schema import Document
 
 from backend.rag.store import get_chroma_collection, get_index
-from backend.rag.transformers import DATA_EXCHANGE_DOC_URL
 from backend.rag.transformers import (
     make_de_transformer,
     transform_de_fueltype,
@@ -33,28 +33,29 @@ BACKUP_RAW_DIR = REPO_ROOT / "data" / "raw.backup"
 # feed at the fuel-type operation sends someone asking about the load forecast
 # to a page that does not mention it, and rule 6 says the source URL is the
 # product.
-DE_FEEDS: dict[str, tuple[str, str]] = {
+DE_FEEDS: dict[str, tuple[str, str, str]] = {
     "DEFuelMix": ("real-time generation by fuel type",
-                  "get-v1-real-time-date-generation-fuel-type"),
-    "DEActualLoad": ("actual load", "get-v1-real-time-date-demand-actual"),
+                  "get-v1-real-time-date-generation-fuel-type", "settled"),
+    "DEActualLoad": ("actual load", "get-v1-real-time-date-demand-actual", "settled"),
     "DEFuelOnMargin": ("fuel on the margin",
-                       "get-v1-real-time-date-generation-fuel-on-the-margin"),
-    "DEDayAheadDemand": ("day-ahead cleared demand", "get-v1-day-ahead-date-demand"),
+                       "get-v1-real-time-date-generation-fuel-on-the-margin", "settled"),
+    "DEDayAheadDemand": ("day-ahead cleared demand", "get-v1-day-ahead-date-demand", "settled"),
     "DEDayAheadFuelMix": ("day-ahead generation by fuel type",
-                          "get-v1-day-ahead-date-generation-fuel-type"),
+                          "get-v1-day-ahead-date-generation-fuel-type", "settled"),
     "DEClearedPhysical": ("day-ahead cleared physical generation",
-                          "get-v1-day-ahead-date-generation-cleared-physical"),
+                          "get-v1-day-ahead-date-generation-cleared-physical", "settled"),
     "DEClearedVirtual": ("day-ahead cleared virtual generation",
-                         "get-v1-day-ahead-date-generation-cleared-virtual"),
+                         "get-v1-day-ahead-date-generation-cleared-virtual", "settled"),
     "DEOfferedEcoMax": ("day-ahead offered generation, economic maximum",
-                        "get-v1-day-ahead-date-generation-offered-ecomax"),
+                        "get-v1-day-ahead-date-generation-offered-ecomax", "settled"),
     "DEOfferedEcoMin": ("day-ahead offered generation, economic minimum",
-                        "get-v1-day-ahead-date-generation-offered-ecomin"),
+                        "get-v1-day-ahead-date-generation-offered-ecomin", "settled"),
     "DENetScheduled": ("day-ahead net scheduled interchange",
-                       "get-v1-day-ahead-date-interchange-net-scheduled"),
-    "DELoadForecast": ("medium-term load forecast", "get-v1-forecast-date-load"),
+                       "get-v1-day-ahead-date-interchange-net-scheduled", "settled"),
+    "DELoadForecast": ("medium-term load forecast", "get-v1-forecast-date-load", "forecast"),
 }
-DE_TITLES = {key: title for key, (title, _) in DE_FEEDS.items()}
+DE_TITLES = {key: title for key, (title, _, _kind) in DE_FEEDS.items()}
+DE_KINDS = {key: kind for key, (_t, _a, kind) in DE_FEEDS.items()}
 
 
 def de_doc_url(key: str) -> str:
@@ -78,10 +79,26 @@ ENDPOINTS_CONFIG: dict[str, tuple[str, Callable[[Any], tuple[str, str, str]]]] =
     "DEFuelMix.json": ("miso_snapshot_de_fueltype", transform_de_fueltype),
     **{
         f"{key}.json": (f"miso_snapshot_{key.lower()}",
-                        make_de_transformer(title, de_doc_url(key)))
-        for key, (title, _) in DE_FEEDS.items() if key != "DEFuelMix"
+                        make_de_transformer(title, de_doc_url(key), kind))
+        for key, (title, _anchor, kind) in DE_FEEDS.items() if key != "DEFuelMix"
     },
 }
+
+
+def expected_endpoints() -> dict:
+    """The endpoints this machine should actually have data for.
+
+    Without a subscription key the poller never fetches Data Exchange, so
+    asking for those files logs eleven "not found" warnings and reports the
+    re-sync incomplete on every five-minute cycle - which trains everyone to
+    ignore a warning that used to mean something. No key is a supported
+    configuration, not a degraded one: the four display feeds are the demo's
+    proven path.
+    """
+    if os.environ.get("MISO_API_KEY"):
+        return dict(ENDPOINTS_CONFIG)
+    return {name: value for name, value in ENDPOINTS_CONFIG.items()
+            if not name.startswith(SETTLED_PREFIX)}
 
 
 def _resolve_raw_file(filename: str, raw_dir: Path | None = None) -> Path | None:
@@ -129,7 +146,10 @@ def upsert_single_endpoint(filename: str, doc_id: str,
     # "Real-Time Display" on a settled market day undoes what the prose works
     # to say. The citation label is shown to the user; it has to agree.
     key = filename.replace(".json", "")
-    title = (f"MISO Data Exchange - {DE_TITLES.get(key, key)} (completed market day)"
+    # "(completed market day)" on the load forecast said the opposite of the
+    # truth: a forecast is not a settlement.
+    qualifier = {"forecast": "forecast"}.get(DE_KINDS.get(key), "completed market day")
+    title = (f"MISO Data Exchange - {DE_TITLES.get(key, key)} ({qualifier})"
              if _doc_type_for(filename) == "settled_market_day"
              else f"MISO {key} Real-Time Display")
 
@@ -184,7 +204,7 @@ def sync_raw_snapshots(raw_dir: Path | None = None) -> dict[str, bool]:
     or Chroma is fed the default directory while the poller writes elsewhere.
     """
     results = {}
-    for filename, (doc_id, transformer) in ENDPOINTS_CONFIG.items():
+    for filename, (doc_id, transformer) in expected_endpoints().items():
         results[filename] = upsert_single_endpoint(filename, doc_id,
                                                    transformer, raw_dir)
     return results
