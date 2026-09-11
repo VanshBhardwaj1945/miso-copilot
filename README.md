@@ -4,8 +4,9 @@ An AI assistant that sits on top of [miso.org](https://www.misoenergy.org) and a
 plain-English questions about MISO's public data - so routine questions get answered in
 seconds instead of becoming emails to MISO's CSR and External Affairs teams.
 
-Built for the **Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intelligent
-Navigation of MISO's Public Information* ([the full prompt, explained](docs/prompt.md)).
+**Took 3rd place at the Fall 2026 MISO Xtern Challenge** (TechPoint) - Prompt 1: *Intelligent
+Navigation of MISO's Public Information* ([the full prompt, explained](docs/prompt.md) ·
+[the demo-day slides](https://vanshbhardwaj.com/miso-ramen-slides.pdf)).
 
 ## The problem
 
