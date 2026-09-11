@@ -58,6 +58,27 @@ def transform_fuelmix(data: dict) -> tuple[str, str, str]:
     return "\n".join(lines), ref_id, MISO_DISPLAY_URL
 
 
+def _hour_ending(value) -> str:
+    """MISO's "hour ending 24" as a clock time a person can read.
+
+    The feeds count hours 1-24, where 24 is midnight at the end of the day and
+    12 is noon. Printed raw it is trading-floor shorthand: "HE 24" means
+    nothing to someone who does not already know, and "hour ending 24" reads
+    like a 24th hour that does not exist on a clock.
+    """
+    try:
+        hour = int(str(value).strip())
+    except (TypeError, ValueError):
+        return ""
+    if not 1 <= hour <= 24:
+        return ""
+    if hour == 24:
+        return "midnight"
+    if hour == 12:
+        return "noon"
+    return f"{hour} AM" if hour < 12 else f"{hour - 12} PM"
+
+
 def transform_load(data: dict) -> tuple[str, str, str]:
     """
     Parses RealTimeTotalLoad.json:
@@ -85,10 +106,11 @@ def transform_load(data: dict) -> tuple[str, str, str]:
         peak = max(hours, key=lambda h: _safe_float(h.get("LoadForecast", 0)),
                    default={})
         if peak:
+            clock = _hour_ending(peak.get("HourEnding"))
+            when = f" in the hour ending {clock} EST" if clock else ""
             lines.append(
                 f"- Day-Ahead Forecast Peak: "
-                f"{_safe_float(peak.get('LoadForecast', 0)):,.0f} MW "
-                f"(Hour Ending {peak.get('HourEnding', '')})")
+                f"{_safe_float(peak.get('LoadForecast', 0)):,.0f} MW{when}")
             lines.append(f"- Day-Ahead Forecast covers {len(hours)} hours; "
                          f"the peak above is the highest of them.")
 
@@ -182,8 +204,9 @@ def transform_windsolar(data: dict) -> tuple[str, str, str]:
     for day in sorted(by_day):
         for key, label in (("wind", "Wind"), ("solar", "Solar")):
             value, hour = by_day[day][key]
-            lines.append(f"- Forecast Peak {label}, {day}: {value:,.1f} MW "
-                         f"(hour ending {hour} EST)")
+            clock = _hour_ending(hour)
+            when = f", in the hour ending {clock} EST" if clock else ""
+            lines.append(f"- Forecast Peak {label}, {day}: {value:,.1f} MW{when}")
     if by_day:
         lines.append("This feed carries two forecast days. Do not report a peak "
                      "as today's without matching the date above.")

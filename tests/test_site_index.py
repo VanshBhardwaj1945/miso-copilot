@@ -226,3 +226,22 @@ def test_ingest_site_index_keeps_the_url_out_of_the_embedding():
     source = inspect.getsource(ingest_docs.ingest_site_index)
     assert "excluded_embed_metadata_keys" in source
     assert "excluded_llm_metadata_keys" in source
+
+
+def test_a_sourced_role_is_rendered_with_its_source():
+    """The sitemap carries names and URLs but no titles, so "who is MISO's
+    CEO?" retrieved a list of bare names and was declined - while the corpus
+    holds the answer in a report signature. The role travels with the document
+    that states it, so the claim can be checked rather than trusted."""
+    from backend.rag import build_site_index as bsi
+    markdown, _ = bsi.build(["https://www.misoenergy.org/meet-miso/leadership/john-r-bear/"])
+    line = [ln for ln in markdown.splitlines() if "john-r-bear" in ln][0]
+    assert "President and Chief Executive Officer of MISO" in line
+    assert "2026 Region Reliability Imperative report" in line
+
+
+def test_a_person_with_no_sourced_role_gets_no_invented_one():
+    from backend.rag import build_site_index as bsi
+    markdown, _ = bsi.build(["https://www.misoenergy.org/meet-miso/leadership/jennifer-curran/"])
+    line = [ln for ln in markdown.splitlines() if "jennifer-curran" in ln][0]
+    assert line.count(" - ") == 2      # name - trail - url, nothing added

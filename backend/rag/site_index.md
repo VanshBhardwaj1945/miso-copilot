@@ -170,7 +170,7 @@ Each entry is: page name - where it sits - URL.
 - **Jeff Lemmer Bio Page** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/jeff-lemmer---bio-page/
 - **Jennifer Curran** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/jennifer-curran/
 - **Joel Cook** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/joel-cook/
-- **John R Bear** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/john-r-bear/
+- **John R Bear** - President and Chief Executive Officer of MISO - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/john-r-bear/ (signed as such in MISO's 2026 Region Reliability Imperative report, February 2026)
 - **Mark S. Johnson** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/mark-s.-johnson
 - **Melissa Brown** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/melissa-brown/
 - **Nancy Lange** - Meet MISO > Leadership - https://www.misoenergy.org/meet-miso/leadership/nancy-lange/

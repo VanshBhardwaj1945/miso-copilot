@@ -241,7 +241,7 @@ def test_the_load_forecast_reports_the_days_peak_not_hour_one():
             {"Forecast": {"HourEnding": "1", "LoadForecast": "78103"}},
             {"Forecast": {"HourEnding": "17", "LoadForecast": "98729"}},
         ]}})
-    assert "Day-Ahead Forecast Peak: 98,729 MW (Hour Ending 17)" in prose
+    assert "Day-Ahead Forecast Peak: 98,729 MW in the hour ending 5 PM EST" in prose
     assert "78,103" not in prose
 
 
@@ -274,8 +274,8 @@ def test_the_wind_forecast_peak_is_reported_per_day():
         {"ForecastDateTimeEST": "2026-09-11 22:00:00", "ForecastHourEndingEST": "23",
          "ForecastWindValue": "19904", "ForecastSolarValue": "0"},
     ]})
-    assert "Forecast Peak Wind, 2026-09-10: 13,561.0 MW (hour ending 24 EST)" in prose
-    assert "Forecast Peak Wind, 2026-09-11: 19,904.0 MW (hour ending 23 EST)" in prose
+    assert "Forecast Peak Wind, 2026-09-10: 13,561.0 MW, in the hour ending midnight EST" in prose
+    assert "Forecast Peak Wind, 2026-09-11: 19,904.0 MW, in the hour ending 11 PM EST" in prose
     assert "two forecast days" in prose
 
 
@@ -303,3 +303,20 @@ def test_the_fuel_type_footprint_claim_is_scoped_to_its_own_feed():
     ]})
     assert "footprint total for this fuel-type feed" in prose
     assert "do not carry this sentence over to them" in prose
+
+
+@pytest.mark.parametrize("hour,expected", [
+    ("1", "1 AM"), ("11", "11 AM"), ("12", "noon"), ("13", "1 PM"),
+    ("17", "5 PM"), ("23", "11 PM"), ("24", "midnight"),
+])
+def test_an_hour_ending_reads_as_a_clock_time(hour, expected):
+    """MISO counts hours 1-24. "HE 24" is trading-floor shorthand and "hour
+    ending 24" reads like a 24th hour no clock has."""
+    from backend.rag.transformers import _hour_ending
+    assert _hour_ending(hour) == expected
+
+
+@pytest.mark.parametrize("bad", ["", "0", "25", "abc", None])
+def test_an_unusable_hour_is_omitted_rather_than_guessed(bad):
+    from backend.rag.transformers import _hour_ending
+    assert _hour_ending(bad) == ""
